@@ -3,7 +3,7 @@
 import 'dart:html' as html;
 import 'dart:typed_data';
 
-Future<String> saveStackBytesImpl(Uint8List bytes, String extension) async {
+Future<String> savePhotoBytesImpl(Uint8List bytes, String extension) async {
   final name = 'stack_${DateTime.now().toIso8601String().replaceAll(':', '-') }.$extension';
   final blob = html.Blob([bytes]);
   final url = html.Url.createObjectUrlFromBlob(blob);
