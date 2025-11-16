@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -49,6 +50,9 @@ class _CameraHomeState extends State<CameraHome> {
   static const double _maxDurationSeconds = 20;
   static const double _minFramesPerSecond = 3;
   static const double _maxFramesPerSecond = 10;
+  static const double _minAutoIsoBias = -2;
+  static const double _maxAutoIsoBias = 2;
+  static const double _defaultAutoIsoBias = -0.25;
 
   CameraController? _controller;
   CameraDescription? _activeCamera;
@@ -66,6 +70,8 @@ class _CameraHomeState extends State<CameraHome> {
   bool _autoFocusEnabled = true;
   bool _starEnhance = true;
   bool _flashAllowed = false;
+  bool _autoIsoEnabled = false;
+  double _autoIsoBias = _defaultAutoIsoBias;
   bool _manualExposureEnabled = false;
   double _manualExposureOffset = 0;
   double _minExposureOffset = -2;
@@ -137,6 +143,49 @@ class _CameraHomeState extends State<CameraHome> {
     }
   }
 
+  Future<void> _setAutoIsoEnabled(bool value) async {
+    if (_isCapturing) {
+      return;
+    }
+
+    setState(() {
+      _autoIsoEnabled = value;
+      if (value) {
+        _manualExposureEnabled = false;
+      }
+    });
+
+    final controller = _controller;
+    if (controller == null) {
+      return;
+    }
+
+    try {
+      if (value) {
+        final double clampedBias =
+            _autoIsoBias.clamp(_minExposureOffset, _maxExposureOffset);
+        _autoIsoBias = clampedBias;
+        await controller.setExposureMode(ExposureMode.auto);
+        await controller.setExposureOffset(clampedBias);
+      } else if (_manualExposureEnabled) {
+        final double clamped =
+            _manualExposureOffset.clamp(_minExposureOffset, _maxExposureOffset);
+        await controller.setExposureMode(ExposureMode.locked);
+        await controller.setExposureOffset(clamped);
+      } else {
+        await controller.setExposureMode(ExposureMode.auto);
+        await controller.setExposureOffset(_fastShutterBias);
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _status = 'Auto ISO update failed: $error';
+      });
+    }
+  }
+
   Future<void> _setManualExposureEnabled(bool value) async {
     if (_isCapturing) {
       return;
@@ -149,6 +198,9 @@ class _CameraHomeState extends State<CameraHome> {
     }
     setState(() {
       _manualExposureEnabled = value;
+      if (value) {
+        _autoIsoEnabled = false;
+      }
     });
 
     final controller = _controller;
@@ -174,6 +226,36 @@ class _CameraHomeState extends State<CameraHome> {
       setState(() {
         _manualExposureEnabled = !value;
         _status = 'Manual exposure failed: $error';
+      });
+    }
+  }
+
+  Future<void> _setAutoIsoBias(double value) async {
+    final double clamped = value.clamp(
+      math.max(_minExposureOffset, _minAutoIsoBias),
+      math.min(_maxExposureOffset, _maxAutoIsoBias),
+    );
+    setState(() {
+      _autoIsoBias = clamped;
+    });
+
+    if (!_autoIsoEnabled) {
+      return;
+    }
+
+    final controller = _controller;
+    if (controller == null) {
+      return;
+    }
+
+    try {
+      await controller.setExposureOffset(clamped);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _status = 'Auto ISO bias failed: $error';
       });
     }
   }
@@ -227,9 +309,15 @@ class _CameraHomeState extends State<CameraHome> {
             _manualExposureOffset.clamp(_minExposureOffset, _maxExposureOffset);
         await controller.setExposureMode(ExposureMode.locked);
         await controller.setExposureOffset(clamped);
+      } else if (_autoIsoEnabled) {
+        final double clamped =
+            _autoIsoBias.clamp(_minExposureOffset, _maxExposureOffset);
+        _autoIsoBias = clamped;
+        await controller.setExposureMode(ExposureMode.auto);
+        await controller.setExposureOffset(clamped);
       } else {
         await controller.setExposureMode(ExposureMode.auto);
-        await controller.setExposureOffset(0);
+        await controller.setExposureOffset(_fastShutterBias);
       }
     } catch (error) {
       if (mounted) {
@@ -252,8 +340,10 @@ class _CameraHomeState extends State<CameraHome> {
         _maxExposureOffset = maxOffset;
         _manualExposureOffset =
             _manualExposureOffset.clamp(minOffset, maxOffset);
+        _autoIsoBias = _autoIsoBias.clamp(minOffset, maxOffset);
         if (_maxExposureOffset <= _minExposureOffset + 0.0001) {
           _manualExposureEnabled = false;
+          _autoIsoEnabled = false;
         }
       });
     } catch (_) {
@@ -281,19 +371,29 @@ class _CameraHomeState extends State<CameraHome> {
       builder: (sheetContext) {
         bool flashTemp = _flashAllowed;
         bool manualTemp = _manualExposureEnabled;
+        bool autoIsoTemp = _autoIsoEnabled;
         double offsetTemp =
             _manualExposureOffset.clamp(_minExposureOffset, _maxExposureOffset);
+        double autoIsoBiasTemp =
+            _autoIsoBias.clamp(_minExposureOffset, _maxExposureOffset);
 
         return StatefulBuilder(
           builder: (sheetContext, setSheetState) {
             final bool exposureAdjustable =
                 _maxExposureOffset > _minExposureOffset + 0.0001;
+            autoIsoBiasTemp = autoIsoBiasTemp.clamp(
+              math.max(_minExposureOffset, _minAutoIsoBias),
+              math.min(_maxExposureOffset, _maxAutoIsoBias),
+            );
             offsetTemp = offsetTemp.clamp(_minExposureOffset, _maxExposureOffset);
             final double isoApprox =
               (100 * math.pow(2, offsetTemp)).toDouble();
             final String isoLabel = isoApprox >= 1000
                 ? 'ISO ${isoApprox.round()}'
                 : 'ISO ${isoApprox.toStringAsFixed(0)}';
+            final String autoIsoLabel =
+                autoIsoBiasTemp >= 0 ? '+${autoIsoBiasTemp.toStringAsFixed(1)} EV' :
+                '${autoIsoBiasTemp.toStringAsFixed(1)} EV';
 
             return Padding(
               padding: EdgeInsets.only(
@@ -370,13 +470,76 @@ class _CameraHomeState extends State<CameraHome> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
+                              const Text('Auto ISO balancing',
+                                  style: TextStyle(color: Colors.white)),
+                              Switch.adaptive(
+                                value: autoIsoTemp,
+                                onChanged: (!_isCapturing && exposureAdjustable)
+                                    ? (value) {
+                                        setSheetState(() {
+                                          autoIsoTemp = value;
+                                          if (value) {
+                                            manualTemp = false;
+                                          }
+                                        });
+                                        _setAutoIsoEnabled(value);
+                                      }
+                                    : null,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            exposureAdjustable
+                                ? 'Let NightPlus trim or boost ISO between frames for a steadier brightness.'
+                                : 'Auto ISO requires cameras that expose EV adjustments.',
+                            style: const TextStyle(color: Colors.white54, fontSize: 12),
+                          ),
+                          const SizedBox(height: 8),
+                          Slider(
+                            value: autoIsoBiasTemp,
+                            min: math.max(_minExposureOffset, _minAutoIsoBias),
+                            max: math.min(_maxExposureOffset, _maxAutoIsoBias),
+                            divisions: exposureAdjustable
+                                ? math.max(
+                                    1,
+                                    ((math.min(_maxExposureOffset, _maxAutoIsoBias) -
+                                                math.max(_minExposureOffset, _minAutoIsoBias)) *
+                                            10)
+                                        .round(),
+                                  )
+                                : 1,
+                            label: autoIsoLabel,
+                            onChanged: (!autoIsoTemp || _isCapturing || !exposureAdjustable)
+                                ? null
+                                : (value) {
+                                    setSheetState(() => autoIsoBiasTemp = value);
+                                    _setAutoIsoBias(value);
+                                  },
+                          ),
+                          Text(
+                            autoIsoTemp
+                                ? 'Bias ${autoIsoLabel}. Negative favors lower ISO, positive leans brighter.'
+                                : 'Enable Auto ISO to tune the bias.',
+                            style: const TextStyle(color: Colors.white38, fontSize: 12),
+                          ),
+                          const SizedBox(height: 16),
+                          const Divider(color: Colors.white12, height: 24),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
                               const Text('Manual exposure',
                                   style: TextStyle(color: Colors.white)),
                               Switch.adaptive(
                                 value: manualTemp,
                                 onChanged: (!_isCapturing && exposureAdjustable)
                                     ? (value) {
-                                        setSheetState(() => manualTemp = value);
+                                        setSheetState(() {
+                                          manualTemp = value;
+                                          if (value) {
+                                            autoIsoTemp = false;
+                                          }
+                                        });
                                         _setManualExposureEnabled(value);
                                       }
                                     : null,
@@ -523,8 +686,11 @@ class _CameraHomeState extends State<CameraHome> {
     }
 
     final bool manualExposure = _manualExposureEnabled;
+    final bool autoIsoActive = _autoIsoEnabled;
     final double manualOffset =
         _manualExposureOffset.clamp(_minExposureOffset, _maxExposureOffset);
+    double autoIsoBias =
+        _autoIsoBias.clamp(_minExposureOffset, _maxExposureOffset);
     final bool flashAllowed = _flashAllowed;
 
     final bool clamped = _isFrameCountClamped;
@@ -559,6 +725,9 @@ class _CameraHomeState extends State<CameraHome> {
         if (manualExposure) {
           await controller.setExposureMode(ExposureMode.locked);
           await controller.setExposureOffset(manualOffset);
+        } else if (autoIsoActive) {
+          await controller.setExposureMode(ExposureMode.auto);
+          await controller.setExposureOffset(autoIsoBias);
         } else {
           await controller.setExposureMode(ExposureMode.auto);
           await controller.setExposureOffset(_fastShutterBias);
@@ -576,6 +745,28 @@ class _CameraHomeState extends State<CameraHome> {
         final Uint8List bytes = await capture.readAsBytes();
         capturedBytes.add(bytes);
         capturedFrames++;
+
+        if (autoIsoActive && capturedFrames < targetFrames) {
+          final double luminance = _estimateAverageLuminance(bytes);
+          const double targetLuma = 58;
+          const double tolerance = 6;
+          double adjustment = 0;
+          if (luminance < targetLuma - tolerance) {
+            adjustment = 0.12;
+          } else if (luminance > targetLuma + tolerance) {
+            adjustment = -0.12;
+          }
+
+          if (adjustment != 0) {
+            autoIsoBias = (autoIsoBias + adjustment)
+                .clamp(_minExposureOffset, _maxExposureOffset);
+            try {
+              await controller.setExposureOffset(autoIsoBias);
+            } catch (_) {
+              // Ignore inability to adjust between frames.
+            }
+          }
+        }
 
         final Duration elapsed = frameStopwatch.elapsed;
         frameStopwatch
@@ -595,6 +786,12 @@ class _CameraHomeState extends State<CameraHome> {
           _status = clamped
               ? 'Captured $capturedFrames of $plannedFrames (limit $targetFrames)'
               : 'Captured $capturedFrames of $targetFrames frames';
+        });
+      }
+
+      if (autoIsoActive && mounted) {
+        setState(() {
+          _autoIsoBias = autoIsoBias;
         });
       }
 
@@ -659,9 +856,12 @@ class _CameraHomeState extends State<CameraHome> {
         if (manualExposure) {
           await controller.setExposureMode(ExposureMode.locked);
           await controller.setExposureOffset(manualOffset);
+        } else if (autoIsoActive) {
+          await controller.setExposureMode(ExposureMode.auto);
+          await controller.setExposureOffset(autoIsoBias);
         } else {
           await controller.setExposureMode(ExposureMode.auto);
-          await controller.setExposureOffset(0);
+          await controller.setExposureOffset(_fastShutterBias);
         }
       } catch (_) {
         // Ignore inability to restore exposure bias.
@@ -710,6 +910,45 @@ class _CameraHomeState extends State<CameraHome> {
     final index = widget.cameras.indexOf(current);
     final next = widget.cameras[(index + 1) % widget.cameras.length];
     await _initializeCamera(next);
+  }
+
+  double _estimateAverageLuminance(Uint8List jpegBytes) {
+    try {
+      final img.Image? decoded = img.decodeImage(jpegBytes);
+      if (decoded == null) {
+        return 0;
+      }
+
+      img.Image sample = decoded;
+      if (decoded.width > 160 || decoded.height > 160) {
+        sample = img.copyResize(
+          decoded,
+          width: 160,
+          height: 160,
+          interpolation: img.Interpolation.average,
+        );
+      }
+
+      final Uint8List bytes = Uint8List.fromList(sample.getBytes());
+      final int channels = sample.numChannels;
+      if (channels < 3) {
+        return 0;
+      }
+
+      double luminanceSum = 0;
+      final int pixelCount = bytes.length ~/ channels;
+      for (int i = 0; i < pixelCount; i++) {
+        final int offset = i * channels;
+        final double r = bytes[offset].toDouble();
+        final double g = bytes[offset + 1].toDouble();
+        final double b = bytes[offset + 2].toDouble();
+        luminanceSum += 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      }
+
+      return luminanceSum / pixelCount;
+    } catch (_) {
+      return 0;
+    }
   }
 
   @override
@@ -968,6 +1207,11 @@ class _CameraHomeState extends State<CameraHome> {
     final double fpsValue = _captureFramesPerSecond
         .clamp(_minFramesPerSecond, _maxFramesPerSecond)
         .toDouble();
+    final double effectiveSeconds = targetFrames / fpsValue;
+    final Iterable<double> durationPresets = const <double>[3, 6, 12, 20]
+      .where((value) => value >= _minDurationSeconds && value <= _maxDurationSeconds);
+    final Iterable<double> fpsPresets = const <double>[3, 4, 6, 8, 10]
+      .where((value) => value >= _minFramesPerSecond && value <= _maxFramesPerSecond);
 
     String framesLabel;
     if (clamped) {
@@ -1001,6 +1245,34 @@ class _CameraHomeState extends State<CameraHome> {
                   });
                 },
         ),
+        if (durationPresets.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: durationPresets
+                .map(
+                  (preset) => ChoiceChip(
+                    label: Text('${preset.toStringAsFixed(0)} s'),
+                    selectedColor: Colors.white24,
+                    labelStyle: TextStyle(
+                      color: (durationValue - preset).abs() < 0.25
+                          ? Colors.white
+                          : Colors.white70,
+                    ),
+                    selected: (durationValue - preset).abs() < 0.25,
+                    onSelected: _isCapturing
+                        ? null
+                        : (selected) {
+                            if (selected) {
+                              setState(() {
+                                _captureDurationSeconds = preset;
+                              });
+                            }
+                          },
+                  ),
+                )
+                .toList(),
+          ),
         const SizedBox(height: 12),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1024,13 +1296,41 @@ class _CameraHomeState extends State<CameraHome> {
                   });
                 },
         ),
+        if (fpsPresets.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: fpsPresets
+                .map(
+                  (preset) => ChoiceChip(
+                    label: Text('${preset.toStringAsFixed(0)} fps'),
+                    selectedColor: Colors.white24,
+                    labelStyle: TextStyle(
+                      color: (fpsValue - preset).abs() < 0.25
+                          ? Colors.white
+                          : Colors.white70,
+                    ),
+                    selected: (fpsValue - preset).abs() < 0.25,
+                    onSelected: _isCapturing
+                        ? null
+                        : (selected) {
+                            if (selected) {
+                              setState(() {
+                                _captureFramesPerSecond = preset;
+                              });
+                            }
+                          },
+                  ),
+                )
+                .toList(),
+          ),
         const SizedBox(height: 12),
         Text(
           framesLabel,
           style: const TextStyle(color: Colors.white70),
         ),
         Text(
-          'Frame interval ≈ ${frameIntervalMs.toStringAsFixed(0)} ms',
+          'Stack time ≈ ${effectiveSeconds.toStringAsFixed(1)} s • Frame gap ${frameIntervalMs.toStringAsFixed(0)} ms',
           style: const TextStyle(color: Colors.white38, fontSize: 12),
         ),
         if (clamped)
