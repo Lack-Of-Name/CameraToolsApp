@@ -56,6 +56,7 @@ class _CameraHomeState extends State<CameraHome> {
   double _progress = 0;
   String? _status;
   String? _lastSavedPath;
+  Uint8List? _lastSavedImageBytes;
   bool _controlsExpanded = false;
 
   double _captureDurationSeconds = 12;
@@ -64,6 +65,11 @@ class _CameraHomeState extends State<CameraHome> {
   bool _focusSupported = false;
   bool _autoFocusEnabled = true;
   bool _starEnhance = true;
+  bool _flashAllowed = false;
+  bool _manualExposureEnabled = false;
+  double _manualExposureOffset = 0;
+  double _minExposureOffset = -2;
+  double _maxExposureOffset = 2;
 
   Timer? _focusDebounce;
 
@@ -105,6 +111,156 @@ class _CameraHomeState extends State<CameraHome> {
     }
   }
 
+  Future<void> _setFlashAllowed(bool value) async {
+    if (_isCapturing) {
+      return;
+    }
+    setState(() {
+      _flashAllowed = value;
+    });
+
+    final controller = _controller;
+    if (controller == null) {
+      return;
+    }
+
+    try {
+      await controller.setFlashMode(value ? FlashMode.auto : FlashMode.off);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _flashAllowed = !value;
+        _status = 'Failed to update flash: $error';
+      });
+    }
+  }
+
+  Future<void> _setManualExposureEnabled(bool value) async {
+    if (_isCapturing) {
+      return;
+    }
+    if (_maxExposureOffset <= _minExposureOffset + 0.0001) {
+      setState(() {
+        _manualExposureEnabled = false;
+      });
+      return;
+    }
+    setState(() {
+      _manualExposureEnabled = value;
+    });
+
+    final controller = _controller;
+    if (controller == null) {
+      return;
+    }
+
+    try {
+      if (value) {
+        final double clamped =
+            _manualExposureOffset.clamp(_minExposureOffset, _maxExposureOffset);
+        _manualExposureOffset = clamped;
+        await controller.setExposureMode(ExposureMode.locked);
+        await controller.setExposureOffset(clamped);
+      } else {
+        await controller.setExposureMode(ExposureMode.auto);
+        await controller.setExposureOffset(0);
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _manualExposureEnabled = !value;
+        _status = 'Manual exposure failed: $error';
+      });
+    }
+  }
+
+  Future<void> _setManualExposureOffset(double value) async {
+    if (_maxExposureOffset <= _minExposureOffset + 0.0001) {
+      return;
+    }
+    final double clamped = value.clamp(_minExposureOffset, _maxExposureOffset);
+    setState(() {
+      _manualExposureOffset = clamped;
+    });
+
+    if (!_manualExposureEnabled) {
+      return;
+    }
+
+    final controller = _controller;
+    if (controller == null) {
+      return;
+    }
+
+    try {
+      await controller.setExposureOffset(clamped);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _status = 'Exposure offset failed: $error';
+      });
+    }
+  }
+
+  Future<void> _applyCurrentFlashPreference(CameraController controller) async {
+    try {
+      await controller.setFlashMode(_flashAllowed ? FlashMode.auto : FlashMode.off);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _status = 'Flash sync failed: $error';
+        });
+      }
+    }
+  }
+
+  Future<void> _applyCurrentExposurePreference(CameraController controller) async {
+    try {
+      if (_manualExposureEnabled) {
+        final double clamped =
+            _manualExposureOffset.clamp(_minExposureOffset, _maxExposureOffset);
+        await controller.setExposureMode(ExposureMode.locked);
+        await controller.setExposureOffset(clamped);
+      } else {
+        await controller.setExposureMode(ExposureMode.auto);
+        await controller.setExposureOffset(0);
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _status = 'Exposure sync failed: $error';
+        });
+      }
+    }
+  }
+
+  Future<void> _refreshExposureBounds(CameraController controller) async {
+    try {
+      final double minOffset = await controller.getMinExposureOffset();
+      final double maxOffset = await controller.getMaxExposureOffset();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _minExposureOffset = minOffset;
+        _maxExposureOffset = maxOffset;
+        _manualExposureOffset =
+            _manualExposureOffset.clamp(minOffset, maxOffset);
+        if (_maxExposureOffset <= _minExposureOffset + 0.0001) {
+          _manualExposureEnabled = false;
+        }
+      });
+    } catch (_) {
+      // Some devices may not report manual bounds; keep defaults.
+    }
+  }
+
   void _setStarEnhance(bool value) {
     setState(() {
       _starEnhance = value;
@@ -123,49 +279,154 @@ class _CameraHomeState extends State<CameraHome> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheetContext) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 24,
-            bottom: 16 + MediaQuery.of(sheetContext).padding.bottom,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Night capture tips',
-                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.of(sheetContext).pop(),
-                    icon: const Icon(Icons.close, color: Colors.white70),
-                  ),
-                ],
+        bool flashTemp = _flashAllowed;
+        bool manualTemp = _manualExposureEnabled;
+        double offsetTemp =
+            _manualExposureOffset.clamp(_minExposureOffset, _maxExposureOffset);
+
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            final bool exposureAdjustable =
+                _maxExposureOffset > _minExposureOffset + 0.0001;
+            offsetTemp = offsetTemp.clamp(_minExposureOffset, _maxExposureOffset);
+            final double isoApprox =
+              (100 * math.pow(2, offsetTemp)).toDouble();
+            final String isoLabel = isoApprox >= 1000
+                ? 'ISO ${isoApprox.round()}'
+                : 'ISO ${isoApprox.toStringAsFixed(0)}';
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 24,
+                bottom: 16 + MediaQuery.of(sheetContext).padding.bottom,
               ),
-              const SizedBox(height: 12),
-              Text(
-                'Use the sliders in the control panel to choose how long to shoot and how many frames to capture per second. NightPlus aligns each frame, blends noise away, and limits processing to $_maxFrameCount frames to keep things responsive.',
-                style: const TextStyle(color: Colors.white70, height: 1.3),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Capture settings',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.of(sheetContext).pop(),
+                          icon: const Icon(Icons.close, color: Colors.white70),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.white10,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Allow flash',
+                                  style: TextStyle(color: Colors.white)),
+                              Switch.adaptive(
+                                value: flashTemp,
+                                onChanged: _isCapturing
+                                    ? null
+                                    : (value) {
+                                        setSheetState(() => flashTemp = value);
+                                        _setFlashAllowed(value);
+                                      },
+                              ),
+                            ],
+                          ),
+                          const Text(
+                            'Leave this off for dark-sky shoots so the flash never triggers unexpectedly.',
+                            style: TextStyle(color: Colors.white38, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.white10,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Manual exposure',
+                                  style: TextStyle(color: Colors.white)),
+                              Switch.adaptive(
+                                value: manualTemp,
+                                onChanged: (!_isCapturing && exposureAdjustable)
+                                    ? (value) {
+                                        setSheetState(() => manualTemp = value);
+                                        _setManualExposureEnabled(value);
+                                      }
+                                    : null,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            exposureAdjustable
+                                ? 'EV ${offsetTemp.toStringAsFixed(1)} · $isoLabel'
+                                : 'This camera does not expose manual EV controls.',
+                            style: const TextStyle(color: Colors.white54, fontSize: 12),
+                          ),
+                          const SizedBox(height: 8),
+                          Slider(
+                            value: offsetTemp,
+                            min: _minExposureOffset,
+                            max: _maxExposureOffset,
+                            divisions: exposureAdjustable
+                                ? math.max(
+                                    1,
+                                    ((_maxExposureOffset - _minExposureOffset) * 10)
+                                        .round(),
+                                  )
+                                : 1,
+                            label: 'EV ${offsetTemp.toStringAsFixed(1)}',
+                            onChanged: (!manualTemp || _isCapturing || !exposureAdjustable)
+                                ? null
+                                : (value) {
+                                    setSheetState(() => offsetTemp = value);
+                                    _setManualExposureOffset(value);
+                                  },
+                          ),
+                          const Text(
+                            'Slide left to shorten exposure (lower ISO) or right to brighten (higher ISO). Hold the phone steady when pushing ISO high.',
+                            style: TextStyle(color: Colors.white38, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'NightPlus captures up to $_maxFrameCount frames. Combine manual EV with the capture planner for the best blend of detail and low noise.',
+                      style: const TextStyle(color: Colors.white54, height: 1.3),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 12),
-              const Text(
-                'Tips',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                '- Higher frame rates freeze motion but increase processing time.\n'
-                '- Longer durations gather more light but rely on steadier hands or a tripod.\n'
-                '- Keep an eye on the frame counter to balance quality and waiting time.',
-                style: TextStyle(color: Colors.white54, height: 1.3),
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -208,6 +469,8 @@ class _CameraHomeState extends State<CameraHome> {
     try {
       await controller.initialize();
 
+      await _refreshExposureBounds(controller);
+
       try {
         await controller.setExposureMode(ExposureMode.auto);
       } on CameraException {
@@ -231,6 +494,9 @@ class _CameraHomeState extends State<CameraHome> {
         _focusSupported = focusSupported;
         _autoFocusEnabled = true;
       });
+
+      await _applyCurrentFlashPreference(controller);
+      await _applyCurrentExposurePreference(controller);
     } on CameraException catch (error) {
       await controller.dispose();
       setState(() {
@@ -256,6 +522,11 @@ class _CameraHomeState extends State<CameraHome> {
       return;
     }
 
+    final bool manualExposure = _manualExposureEnabled;
+    final double manualOffset =
+        _manualExposureOffset.clamp(_minExposureOffset, _maxExposureOffset);
+    final bool flashAllowed = _flashAllowed;
+
     final bool clamped = _isFrameCountClamped;
     final Duration frameInterval = Duration(
       microseconds: (1000000 / _captureFramesPerSecond).round(),
@@ -275,15 +546,25 @@ class _CameraHomeState extends State<CameraHome> {
 
     try {
       try {
-        await controller.setExposureMode(ExposureMode.auto);
-      } on CameraException {
-        // If automatic exposure is unavailable, continue.
+        await controller.setFlashMode(flashAllowed ? FlashMode.auto : FlashMode.off);
+      } catch (error) {
+        if (mounted) {
+          setState(() {
+            _status = 'Flash disabled for capture (reason: $error)';
+          });
+        }
       }
 
       try {
-        await controller.setExposureOffset(_fastShutterBias);
+        if (manualExposure) {
+          await controller.setExposureMode(ExposureMode.locked);
+          await controller.setExposureOffset(manualOffset);
+        } else {
+          await controller.setExposureMode(ExposureMode.auto);
+          await controller.setExposureOffset(_fastShutterBias);
+        }
       } on CameraException {
-        // Some devices do not support biasing exposure toward faster shutters.
+        // Continue even if exposure adjustments are not available.
       }
 
       while (capturedFrames < targetFrames) {
@@ -339,11 +620,13 @@ class _CameraHomeState extends State<CameraHome> {
         _ProcessFramesRequest(frames: capturedBytes, starEnhance: _starEnhance),
       );
 
+      final Uint8List finalBytes = processed.jpegBytes;
       final savedLocation =
-          await saveProcessedPhotoBytes(processed.jpegBytes, 'jpg');
+          await saveProcessedPhotoBytes(finalBytes, 'jpg');
 
       if (mounted) {
         setState(() {
+          _lastSavedImageBytes = finalBytes;
           _lastSavedPath = savedLocation;
           _status = 'Saved night photo';
           _progress = 1;
@@ -373,7 +656,13 @@ class _CameraHomeState extends State<CameraHome> {
       }
 
       try {
-        await controller.setExposureOffset(0);
+        if (manualExposure) {
+          await controller.setExposureMode(ExposureMode.locked);
+          await controller.setExposureOffset(manualOffset);
+        } else {
+          await controller.setExposureMode(ExposureMode.auto);
+          await controller.setExposureOffset(0);
+        }
       } catch (_) {
         // Ignore inability to restore exposure bias.
       }
@@ -596,14 +885,9 @@ class _CameraHomeState extends State<CameraHome> {
   }
 
   Widget _buildPreviewButton() {
+    final Uint8List? previewBytes = _lastSavedImageBytes;
     return GestureDetector(
-      onTap: () {
-        if (_lastSavedPath != null && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Latest capture stored in Photos')),
-          );
-        }
-      },
+      onTap: _openRecentPhotoEditor,
       child: Container(
         width: 52,
         height: 52,
@@ -612,8 +896,55 @@ class _CameraHomeState extends State<CameraHome> {
           border: Border.all(color: Colors.white24, width: 2),
           color: Colors.white10,
         ),
-        child: const Icon(Icons.photo_library_outlined, color: Colors.white70),
+        clipBehavior: Clip.hardEdge,
+        child: previewBytes != null
+            ? Image.memory(
+                previewBytes,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+              )
+            : const Center(
+                child: Icon(
+                  Icons.photo_library_outlined,
+                  color: Colors.white70,
+                ),
+              ),
       ),
+    );
+  }
+
+  Future<void> _openRecentPhotoEditor() async {
+    if (_lastSavedImageBytes == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Capture a photo to review it.')),
+      );
+      return;
+    }
+
+    final _EditedPhotoResult? edited = await Navigator.of(context)
+        .push<_EditedPhotoResult>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (routeContext) => RecentPhotoEditor(
+          imageBytes: _lastSavedImageBytes!,
+        ),
+      ),
+    );
+
+    if (!mounted || edited == null) {
+      return;
+    }
+
+    setState(() {
+      _lastSavedImageBytes = edited.bytes;
+      _lastSavedPath = edited.savedPath;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Edited copy saved to Photos')),
     );
   }
 
@@ -1346,4 +1677,560 @@ Uint8List _boxBlur3x3(Uint8List data, int width, int height) {
   }
 
   return output;
+}
+
+Uint8List _applyPhotoAdjustments(
+  Uint8List source,
+  double exposureStops,
+  double shadowLift,
+  double saturationDelta,
+) {
+  final Uint8List result = Uint8List(source.length);
+  final double exposureScale = math.pow(2.0, exposureStops).toDouble();
+  final double liftedShadows = shadowLift.clamp(0.0, 1.0);
+  final double saturationFactor = 1.0 + saturationDelta;
+
+  for (int i = 0; i < source.length; i += 3) {
+    double r = source[i].toDouble() * exposureScale;
+    double g = source[i + 1].toDouble() * exposureScale;
+    double b = source[i + 2].toDouble() * exposureScale;
+
+    final double luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0;
+    if (liftedShadows > 0) {
+      final double lift = liftedShadows * (1.0 - math.pow(luminance, 0.6));
+      r += 255.0 * lift * 0.9;
+      g += 255.0 * lift;
+      b += 255.0 * lift * 1.05;
+    }
+
+    if (saturationDelta != 0) {
+      final double avg = (r + g + b) / 3.0;
+      r = avg + (r - avg) * saturationFactor;
+      g = avg + (g - avg) * saturationFactor;
+      b = avg + (b - avg) * saturationFactor;
+    }
+
+    result[i] = _clampToByte(r);
+    result[i + 1] = _clampToByte(g);
+    result[i + 2] = _clampToByte(b);
+  }
+
+  return result;
+}
+
+class _EditedPhotoResult {
+  const _EditedPhotoResult({required this.bytes, required this.savedPath});
+
+  final Uint8List bytes;
+  final String savedPath;
+}
+
+// Lightweight editor for tweaking the most recent capture.
+class RecentPhotoEditor extends StatefulWidget {
+  const RecentPhotoEditor({super.key, required this.imageBytes});
+
+  final Uint8List imageBytes;
+
+  @override
+  State<RecentPhotoEditor> createState() => _RecentPhotoEditorState();
+}
+
+class _RecentPhotoEditorState extends State<RecentPhotoEditor> {
+  Uint8List? _previewJpeg;
+  Uint8List? _basePreviewJpeg;
+  Uint8List? _previewRgb;
+  Uint8List? _fullRgb;
+
+  int _previewWidth = 0;
+  int _previewHeight = 0;
+  int _fullWidth = 0;
+  int _fullHeight = 0;
+
+  double _exposureStops = 0;
+  double _shadowLift = 0;
+  double _saturationDelta = 0;
+
+  bool _preparing = true;
+  bool _isSaving = false;
+  String? _error;
+
+  Timer? _previewDebounce;
+  bool _renderingPreview = false;
+  bool _previewDirty = false;
+
+  bool get _isNeutralAdjustments =>
+      _exposureStops.abs() < 0.001 &&
+      _shadowLift.abs() < 0.001 &&
+      _saturationDelta.abs() < 0.001;
+
+  @override
+  void initState() {
+    super.initState();
+    _prepareImage();
+  }
+
+  @override
+  void dispose() {
+    _previewDebounce?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _prepareImage() async {
+    try {
+      final img.Image? decoded = img.decodeImage(widget.imageBytes);
+      if (decoded == null) {
+        throw Exception('Unable to decode the captured image.');
+      }
+
+      final img.Image rgb = decoded.convert(numChannels: 3);
+      _fullWidth = rgb.width;
+      _fullHeight = rgb.height;
+      _fullRgb = Uint8List.fromList(
+        rgb.getBytes(order: img.ChannelOrder.rgb),
+      );
+
+      const double previewLimit = 1400;
+      img.Image preview = rgb;
+      final double longestSide = math.max(rgb.width, rgb.height).toDouble();
+      if (longestSide > previewLimit) {
+        final double scale = previewLimit / longestSide;
+        final int targetWidth = math.max(1, (rgb.width * scale).round());
+        final int targetHeight = math.max(1, (rgb.height * scale).round());
+        preview = img.copyResize(
+          rgb,
+          width: targetWidth,
+          height: targetHeight,
+          interpolation: img.Interpolation.average,
+        );
+      }
+
+      _previewWidth = preview.width;
+      _previewHeight = preview.height;
+      _previewRgb = Uint8List.fromList(
+        preview.getBytes(order: img.ChannelOrder.rgb),
+      );
+
+      _basePreviewJpeg = Uint8List.fromList(
+        img.encodeJpg(preview, quality: 92),
+      );
+      _previewJpeg = _basePreviewJpeg;
+
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _preparing = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = '$error';
+        _preparing = false;
+      });
+    }
+  }
+
+  void _schedulePreview() {
+    if (_preparing || _previewRgb == null) {
+      return;
+    }
+    _previewDebounce?.cancel();
+    _previewDebounce = Timer(const Duration(milliseconds: 90), _renderPreview);
+  }
+
+  void _renderPreview() {
+    if (!mounted || _preparing || _previewRgb == null) {
+      return;
+    }
+    if (_renderingPreview) {
+      _previewDirty = true;
+      return;
+    }
+    if (_basePreviewJpeg == null) {
+      return;
+    }
+
+    _renderingPreview = true;
+    do {
+      _previewDirty = false;
+
+      Uint8List nextBytes;
+      if (_isNeutralAdjustments) {
+        nextBytes = _basePreviewJpeg!;
+      } else {
+        final Uint8List adjusted = _applyPhotoAdjustments(
+          _previewRgb!,
+          _exposureStops,
+          _shadowLift,
+          _saturationDelta,
+        );
+        final img.Image previewImage = img.Image.fromBytes(
+          width: _previewWidth,
+          height: _previewHeight,
+          bytes: adjusted.buffer,
+          numChannels: 3,
+          order: img.ChannelOrder.rgb,
+        );
+        nextBytes = Uint8List.fromList(
+          img.encodeJpg(previewImage, quality: 90),
+        );
+      }
+
+      if (!mounted) {
+        _renderingPreview = false;
+        return;
+      }
+
+      setState(() {
+        _previewJpeg = nextBytes;
+      });
+    } while (_previewDirty);
+
+    _renderingPreview = false;
+  }
+
+  void _resetAdjustments() {
+    if (_isNeutralAdjustments) {
+      return;
+    }
+    _previewDebounce?.cancel();
+    setState(() {
+      _exposureStops = 0;
+      _shadowLift = 0;
+      _saturationDelta = 0;
+      _previewJpeg = _basePreviewJpeg;
+    });
+  }
+
+  Future<void> _saveEdits() async {
+    if (_isSaving || _preparing || _error != null) {
+      return;
+    }
+    final Uint8List? baseFull = _fullRgb;
+    if (baseFull == null) {
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      Uint8List encoded;
+      if (_isNeutralAdjustments) {
+        encoded = Uint8List.fromList(widget.imageBytes);
+      } else {
+        final Uint8List adjusted = _applyPhotoAdjustments(
+          baseFull,
+          _exposureStops,
+          _shadowLift,
+          _saturationDelta,
+        );
+        final img.Image output = img.Image.fromBytes(
+          width: _fullWidth,
+          height: _fullHeight,
+          bytes: adjusted.buffer,
+          numChannels: 3,
+          order: img.ChannelOrder.rgb,
+        );
+        encoded = Uint8List.fromList(img.encodeJpg(output, quality: 96));
+      }
+
+      final String savedPath = await saveProcessedPhotoBytes(encoded, 'jpg');
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop(
+        _EditedPhotoResult(bytes: encoded, savedPath: savedPath),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save: $error')),
+      );
+      setState(() {
+        _isSaving = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final double bottomPadding = MediaQuery.of(context).padding.bottom;
+    final bool ready = !_preparing && _error == null && _previewJpeg != null;
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            _buildHeader(),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: _buildPreviewContent(ready),
+              ),
+            ),
+            if (_error == null)
+              _buildAdjustments(ready && !_isSaving, bottomPadding)
+            else
+              _buildErrorFooter(bottomPadding),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          IconButton(
+            onPressed:
+                _isSaving ? null : () => Navigator.of(context).maybePop(),
+            icon: const Icon(Icons.close, color: Colors.white70),
+          ),
+          const Expanded(
+            child: Text(
+              'Edit Recent Photo',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 48),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPreviewContent(bool ready) {
+    if (_error != null) {
+      return Center(
+        child: Text(
+          _error!,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Colors.white70),
+        ),
+      );
+    }
+
+    if (!ready) {
+      return const Center(
+        child: CircularProgressIndicator.adaptive(
+          valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+        ),
+      );
+    }
+
+    final double aspectRatio = _previewWidth <= 0 || _previewHeight <= 0
+        ? 1
+        : _previewWidth / _previewHeight;
+
+    return InteractiveViewer(
+      minScale: 1,
+      maxScale: 4,
+      child: Center(
+        child: AspectRatio(
+          aspectRatio: aspectRatio,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: Image.memory(
+              _previewJpeg!,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              filterQuality: FilterQuality.high,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAdjustments(bool enabled, double bottomPadding) {
+    return Container(
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        color: Color(0xF0101012),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 18,
+        bottom: 20 + bottomPadding,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 38,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          _buildAdjustmentSlider(
+            label: 'Exposure',
+            value: _exposureStops,
+            min: -1.5,
+            max: 1.5,
+            divisions: 60,
+            displayValue: _exposureStops >= 0
+                ? '+${_exposureStops.toStringAsFixed(1)} EV'
+                : '${_exposureStops.toStringAsFixed(1)} EV',
+            enabled: enabled,
+            onChanged: (value) {
+              setState(() => _exposureStops = value);
+              _schedulePreview();
+            },
+          ),
+          const SizedBox(height: 12),
+          _buildAdjustmentSlider(
+            label: 'Shadow lift',
+            value: _shadowLift,
+            min: 0,
+            max: 0.6,
+            divisions: 30,
+            displayValue: '${(_shadowLift * 100).round()}%',
+            enabled: enabled,
+            onChanged: (value) {
+              setState(() => _shadowLift = value);
+              _schedulePreview();
+            },
+          ),
+          const SizedBox(height: 12),
+          _buildAdjustmentSlider(
+            label: 'Saturation',
+            value: _saturationDelta,
+            min: -0.5,
+            max: 0.6,
+            divisions: 44,
+            displayValue: _formatPercentDelta(_saturationDelta),
+            enabled: enabled,
+            onChanged: (value) {
+              setState(() => _saturationDelta = value);
+              _schedulePreview();
+            },
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              TextButton(
+                onPressed: !_isNeutralAdjustments ? _resetAdjustments : null,
+                child: const Text('Reset'),
+              ),
+              const Spacer(),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black87,
+                  disabledBackgroundColor: Colors.white24,
+                  disabledForegroundColor: Colors.black38,
+                ),
+                onPressed: (!enabled || _isSaving) ? null : _saveEdits,
+                child: _isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.black87),
+                        ),
+                      )
+                    : const Text('Save copy'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAdjustmentSlider({
+    required String label,
+    required double value,
+    required double min,
+    required double max,
+    required String displayValue,
+    required ValueChanged<double> onChanged,
+    bool enabled = true,
+    int? divisions,
+  }) {
+    final double clamped = value.clamp(min, max);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            Text(
+              displayValue,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+            ),
+          ],
+        ),
+        Slider(
+          value: clamped,
+          min: min,
+          max: max,
+          divisions: divisions,
+          onChanged: enabled ? onChanged : null,
+          activeColor: Colors.white,
+          inactiveColor: Colors.white24,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildErrorFooter(double bottomPadding) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 24,
+        right: 24,
+        bottom: 24 + bottomPadding,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            _error ?? 'Something went wrong.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white70),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: () => Navigator.of(context).maybePop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatPercentDelta(double value) {
+    final int percent = (value * 100).round();
+    if (percent == 0) {
+      return '0%';
+    }
+    return percent > 0 ? '+$percent%' : '$percent%';
+  }
 }
