@@ -43,22 +43,12 @@ class CameraHome extends StatefulWidget {
 }
 
 class _CameraHomeState extends State<CameraHome> {
-  static const int _minFrameCount = 20;
-  static const int _maxFrameCount = 60;
+  static const int _maxFrameCount = 180;
   static const double _fastShutterBias = -1.5;
-  static const List<double> _baseExposureDurations = [
-    0.5,
-    1,
-    2,
-    3,
-    5,
-    10,
-    15,
-    20,
-    30,
-    45,
-    60,
-  ];
+  static const double _minDurationSeconds = 3;
+  static const double _maxDurationSeconds = 20;
+  static const double _minFramesPerSecond = 3;
+  static const double _maxFramesPerSecond = 10;
 
   CameraController? _controller;
   CameraDescription? _activeCamera;
@@ -68,45 +58,21 @@ class _CameraHomeState extends State<CameraHome> {
   String? _lastSavedPath;
   bool _controlsExpanded = false;
 
-  int _maxExposureIndex = 5;
-  int _exposureOptionIndex = 2;
+  double _captureDurationSeconds = 12;
+  double _captureFramesPerSecond = 6;
   double _focusDepth = 0.5;
   bool _focusSupported = false;
   bool _autoFocusEnabled = true;
+  bool _starEnhance = true;
 
   Timer? _focusDebounce;
 
-  List<double> get _availableExposureOptions =>
-      _baseExposureDurations.take(_maxExposureIndex + 1).toList();
+  int get _plannedFrameCount =>
+      math.max(1, (_captureDurationSeconds * _captureFramesPerSecond).round());
 
-  double get _desiredExposureSeconds =>
-      _availableExposureOptions[_exposureOptionIndex.clamp(0, _availableExposureOptions.length - 1)];
+  int get _targetFrameCount => math.min(_plannedFrameCount, _maxFrameCount);
 
-  void _ensureExposureSelectionWithinBounds() {
-    final optionsLength = _availableExposureOptions.length;
-    if (_exposureOptionIndex >= optionsLength) {
-      _exposureOptionIndex = optionsLength - 1;
-    }
-    if (_exposureOptionIndex < 0) {
-      _exposureOptionIndex = 0;
-    }
-  }
-
-  int _framesForSeconds(double seconds) {
-    if (_availableExposureOptions.isEmpty) {
-      return _minFrameCount;
-    }
-    final double minSeconds = _availableExposureOptions.first;
-    final double maxSeconds = _availableExposureOptions.last;
-    if (maxSeconds <= minSeconds) {
-      return _minFrameCount;
-    }
-    final double normalized =
-        ((seconds - minSeconds) / (maxSeconds - minSeconds)).clamp(0.0, 1.0);
-    final double frames =
-        _minFrameCount + normalized * (_maxFrameCount - _minFrameCount);
-    return frames.round().clamp(_minFrameCount, _maxFrameCount);
-  }
+  bool get _isFrameCountClamped => _plannedFrameCount > _maxFrameCount;
 
   Future<void> _setAutoFocusEnabled(bool value) async {
     if (!_focusSupported) {
@@ -139,12 +105,16 @@ class _CameraHomeState extends State<CameraHome> {
     }
   }
 
+  void _setStarEnhance(bool value) {
+    setState(() {
+      _starEnhance = value;
+    });
+  }
+
   Future<void> _openSettingsSheet() async {
     if (!mounted) {
       return;
     }
-    final maxIndex = _baseExposureDurations.length - 1;
-    int tempIndex = _maxExposureIndex;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -153,70 +123,49 @@ class _CameraHomeState extends State<CameraHome> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (sheetContext, setSheetState) {
-            final double maxSeconds = _baseExposureDurations[tempIndex];
-            final String label = maxSeconds >= 1
-                ? '${maxSeconds.toStringAsFixed(maxSeconds.truncateToDouble() == maxSeconds ? 0 : 1)}s'
-                : '${maxSeconds.toStringAsFixed(1)}s';
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 24,
-                bottom: 16 + MediaQuery.of(sheetContext).padding.bottom,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 24,
+            bottom: 16 + MediaQuery.of(sheetContext).padding.bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Settings',
-                        style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.of(sheetContext).pop(),
-                        icon: const Icon(Icons.close, color: Colors.white70),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
                   const Text(
-                    'Maximum exposure duration',
-                    style: TextStyle(color: Colors.white70),
+                    'Night capture tips',
+                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    label,
-                    style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w600),
-                  ),
-                  Slider(
-                    value: tempIndex.toDouble(),
-                    min: 0,
-                    max: maxIndex.toDouble(),
-                    divisions: maxIndex,
-                    label: label,
-                    onChanged: (value) {
-                      final int newIndex = value.round().clamp(0, maxIndex);
-                      setSheetState(() => tempIndex = newIndex);
-                      setState(() {
-                        _maxExposureIndex = newIndex;
-                        _ensureExposureSelectionWithinBounds();
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'NightPlus stacks multiple shorter frames when a single capture exceeds the device limit. Extending the maximum lets you plan longer stacks when you need more light.',
-                    style: TextStyle(color: Colors.white54),
+                  IconButton(
+                    onPressed: () => Navigator.of(sheetContext).pop(),
+                    icon: const Icon(Icons.close, color: Colors.white70),
                   ),
                 ],
               ),
-            );
-          },
+              const SizedBox(height: 12),
+              Text(
+                'Use the sliders in the control panel to choose how long to shoot and how many frames to capture per second. NightPlus aligns each frame, blends noise away, and limits processing to $_maxFrameCount frames to keep things responsive.',
+                style: const TextStyle(color: Colors.white70, height: 1.3),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Tips',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '- Higher frame rates freeze motion but increase processing time.\n'
+                '- Longer durations gather more light but rely on steadier hands or a tripod.\n'
+                '- Keep an eye on the frame counter to balance quality and waiting time.',
+                style: TextStyle(color: Colors.white54, height: 1.3),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -280,8 +229,7 @@ class _CameraHomeState extends State<CameraHome> {
         _activeCamera = description;
         _status = null;
         _focusSupported = focusSupported;
-          _autoFocusEnabled = true;
-        _ensureExposureSelectionWithinBounds();
+        _autoFocusEnabled = true;
       });
     } on CameraException catch (error) {
       await controller.dispose();
@@ -302,20 +250,28 @@ class _CameraHomeState extends State<CameraHome> {
       return;
     }
 
-    final int targetFrames = _framesForSeconds(_desiredExposureSeconds);
+    final int plannedFrames = _plannedFrameCount;
+    final int targetFrames = _targetFrameCount;
     if (targetFrames <= 0) {
       return;
     }
 
+    final bool clamped = _isFrameCountClamped;
+    final Duration frameInterval = Duration(
+      microseconds: (1000000 / _captureFramesPerSecond).round(),
+    );
+    final Stopwatch frameStopwatch = Stopwatch();
+
     setState(() {
       _isCapturing = true;
       _progress = 0;
-      _status = 'Capturing night stack ($targetFrames frames)…';
+      _status = clamped
+          ? 'Capturing $targetFrames / $plannedFrames frames…'
+          : 'Capturing night stack ($targetFrames frames)…';
     });
 
-    _DecodedFrame? referenceFrame;
-    _FrameAccumulator? accumulator;
     int capturedFrames = 0;
+    final List<Uint8List> capturedBytes = <Uint8List>[];
 
     try {
       try {
@@ -331,28 +287,23 @@ class _CameraHomeState extends State<CameraHome> {
       }
 
       while (capturedFrames < targetFrames) {
+        frameStopwatch
+          ..reset()
+          ..start();
+
         final XFile capture = await controller.takePicture();
         final Uint8List bytes = await capture.readAsBytes();
-
-        final _DecodedFrame frame =
-            await compute(_decodeFrame, _DecodeFrameRequest(bytes));
-        if (!frame.isValid) {
-          continue;
-        }
-
-        accumulator ??= _FrameAccumulator(frame.width, frame.height, frame.rgbBytes);
-
-        if (capturedFrames == 0) {
-          referenceFrame = frame;
-          accumulator.addFrame(frame.rgbBytes, dx: 0, dy: 0);
-        } else {
-          final _AlignmentResult alignment =
-              _estimateAlignment(referenceFrame!, frame);
-          accumulator.addFrame(frame.rgbBytes,
-              dx: alignment.dx, dy: alignment.dy);
-        }
-
+        capturedBytes.add(bytes);
         capturedFrames++;
+
+        final Duration elapsed = frameStopwatch.elapsed;
+        frameStopwatch
+          ..stop()
+          ..reset();
+
+        if (elapsed < frameInterval) {
+          await Future.delayed(frameInterval - elapsed);
+        }
 
         if (!mounted) {
           return;
@@ -360,34 +311,36 @@ class _CameraHomeState extends State<CameraHome> {
 
         setState(() {
           _progress = capturedFrames / targetFrames;
-          _status = 'Captured $capturedFrames of $targetFrames frames';
+          _status = clamped
+              ? 'Captured $capturedFrames of $plannedFrames (limit $targetFrames)'
+              : 'Captured $capturedFrames of $targetFrames frames';
         });
       }
 
-      if (accumulator == null || referenceFrame == null) {
+      if (capturedBytes.isEmpty) {
         throw Exception('No usable frames captured');
       }
 
       if (mounted) {
         setState(() {
-          _status = 'Processing frames…';
+          _status = 'Processing frames (you can move now)…';
           _progress = 0.9;
         });
       }
 
-      final _FinalizeNightImageRequest finalizeRequest =
-          _FinalizeNightImageRequest(
-        sums: accumulator.sums,
-        counts: accumulator.counts,
-        reference: accumulator.reference,
-        width: accumulator.width,
-        height: accumulator.height,
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Frames captured. You can move while we process.')),
+        );
+      }
+
+      final _ProcessFramesResult processed = await compute(
+        _processCapturedFrames,
+        _ProcessFramesRequest(frames: capturedBytes, starEnhance: _starEnhance),
       );
 
-      final Uint8List jpegBytes =
-          await compute(_finalizeNightImage, finalizeRequest);
-
-      final savedLocation = await saveProcessedPhotoBytes(jpegBytes, 'jpg');
+      final savedLocation =
+          await saveProcessedPhotoBytes(processed.jpegBytes, 'jpg');
 
       if (mounted) {
         setState(() {
@@ -396,7 +349,13 @@ class _CameraHomeState extends State<CameraHome> {
           _progress = 1;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Night stack saved ($capturedFrames frames)')),
+          SnackBar(
+            content: Text(
+              clamped
+                  ? 'Saved ${processed.processedFrames} frames (requested $plannedFrames)'
+                  : 'Night stack saved (${processed.processedFrames} frames)',
+            ),
+          ),
         );
       }
     } catch (error) {
@@ -581,7 +540,7 @@ class _CameraHomeState extends State<CameraHome> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                  _buildExposureDurationSelector(),
+                  _buildCapturePlanner(),
                   if (_focusSupported) ...[
                     const SizedBox(height: 16),
                     _buildAutoFocusToggle(),
@@ -667,16 +626,24 @@ class _CameraHomeState extends State<CameraHome> {
     );
   }
 
-  Widget _buildExposureDurationSelector() {
-    _ensureExposureSelectionWithinBounds();
-    final options = _availableExposureOptions;
-    final List<String> labels = options.map((seconds) {
-      final int frames = _framesForSeconds(seconds);
-      final String timeLabel = seconds >= 1
-        ? '${seconds.toStringAsFixed(seconds.truncateToDouble() == seconds ? 0 : 1)}s'
-        : '${seconds.toStringAsFixed(1)}s';
-      return '$timeLabel · ${frames}f';
-    }).toList();
+  Widget _buildCapturePlanner() {
+    final int plannedFrames = _plannedFrameCount;
+    final int targetFrames = _targetFrameCount;
+    final bool clamped = _isFrameCountClamped;
+    final double frameIntervalMs = 1000 / _captureFramesPerSecond;
+    final double durationValue = _captureDurationSeconds
+        .clamp(_minDurationSeconds, _maxDurationSeconds)
+        .toDouble();
+    final double fpsValue = _captureFramesPerSecond
+        .clamp(_minFramesPerSecond, _maxFramesPerSecond)
+        .toDouble();
+
+    String framesLabel;
+    if (clamped) {
+      framesLabel = '$targetFrames frames (limited from $plannedFrames)';
+    } else {
+      framesLabel = '$plannedFrames frames planned';
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -684,24 +651,76 @@ class _CameraHomeState extends State<CameraHome> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Exposure duration', style: TextStyle(color: Colors.white)),
-            Text(labels[_exposureOptionIndex], style: const TextStyle(color: Colors.white70)),
+            const Text('Capture duration', style: TextStyle(color: Colors.white)),
+            Text('${durationValue.toStringAsFixed(1)}s',
+                style: const TextStyle(color: Colors.white70)),
           ],
         ),
         Slider(
-          value: _exposureOptionIndex.clamp(0, options.length - 1).toDouble(),
-          min: 0,
-          max: (options.length - 1).toDouble(),
-          divisions: options.length > 1 ? options.length - 1 : null,
-          label: labels[_exposureOptionIndex.clamp(0, options.length - 1)],
+          value: durationValue,
+          min: _minDurationSeconds,
+          max: _maxDurationSeconds,
+          divisions: ((_maxDurationSeconds - _minDurationSeconds) * 2).round(),
+          label: '${durationValue.toStringAsFixed(1)}s',
           onChanged: _isCapturing
               ? null
               : (value) {
                   setState(() {
-                    _exposureOptionIndex =
-                        value.round().clamp(0, _availableExposureOptions.length - 1);
+                    _captureDurationSeconds = value;
                   });
                 },
+        ),
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Exposure rate', style: TextStyle(color: Colors.white)),
+            Text('${fpsValue.toStringAsFixed(1)} fps',
+                style: const TextStyle(color: Colors.white70)),
+          ],
+        ),
+        Slider(
+          value: fpsValue,
+          min: _minFramesPerSecond,
+          max: _maxFramesPerSecond,
+          divisions: ((_maxFramesPerSecond - _minFramesPerSecond) * 2).round(),
+          label: '${fpsValue.toStringAsFixed(1)} fps',
+          onChanged: _isCapturing
+              ? null
+              : (value) {
+                  setState(() {
+                    _captureFramesPerSecond = value;
+                  });
+                },
+        ),
+        const SizedBox(height: 12),
+        Text(
+          framesLabel,
+          style: const TextStyle(color: Colors.white70),
+        ),
+        Text(
+          'Frame interval ≈ ${frameIntervalMs.toStringAsFixed(0)} ms',
+          style: const TextStyle(color: Colors.white38, fontSize: 12),
+        ),
+        if (clamped)
+          const Text(
+            'Reduce duration or frame rate to stay within the processing limit.',
+            style: TextStyle(color: Colors.orangeAccent, fontSize: 12),
+          ),
+        const SizedBox(height: 16),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Star highlight boost', style: TextStyle(color: Colors.white)),
+            Switch.adaptive(
+              value: _starEnhance,
+              onChanged: _isCapturing ? null : _setStarEnhance,
+            ),
+          ],
+        ),
+        const Text(
+          'Keeps bright pinpoints from the brightest frame and lifts deep shadows.',
+          style: TextStyle(color: Colors.white38, fontSize: 12),
         ),
       ],
     );
@@ -816,6 +835,68 @@ class _CameraHomeState extends State<CameraHome> {
       ),
     );
   }
+}
+
+class _ProcessFramesRequest {
+  const _ProcessFramesRequest({required this.frames, required this.starEnhance});
+
+  final List<Uint8List> frames;
+  final bool starEnhance;
+}
+
+class _ProcessFramesResult {
+  const _ProcessFramesResult({required this.jpegBytes, required this.processedFrames});
+
+  final Uint8List jpegBytes;
+  final int processedFrames;
+}
+
+_ProcessFramesResult _processCapturedFrames(_ProcessFramesRequest request) {
+  _DecodedFrame? referenceFrame;
+  _FrameAccumulator? accumulator;
+  int processedFrames = 0;
+
+  for (final Uint8List bytes in request.frames) {
+    final _DecodedFrame frame =
+        _decodeFrame(_DecodeFrameRequest(bytes));
+    if (!frame.isValid) {
+      continue;
+    }
+
+    if (referenceFrame == null) {
+      referenceFrame = frame;
+      accumulator = _FrameAccumulator(frame.width, frame.height, frame.rgbBytes);
+      accumulator.addFrame(frame.rgbBytes, dx: 0, dy: 0);
+      processedFrames++;
+      continue;
+    }
+
+    final _AlignmentResult alignment =
+        _estimateAlignment(referenceFrame, frame);
+    accumulator!.addFrame(frame.rgbBytes, dx: alignment.dx, dy: alignment.dy);
+    processedFrames++;
+  }
+
+  if (accumulator == null || referenceFrame == null || processedFrames == 0) {
+    throw ArgumentError('None of the frames could be processed.');
+  }
+
+  final _FinalizeNightImageRequest finalizeRequest = _FinalizeNightImageRequest(
+    sums: accumulator.sums,
+    sumSquares: accumulator.sumSquares,
+    counts: accumulator.counts,
+    reference: accumulator.reference,
+    maxValues: accumulator.maxValues,
+    width: accumulator.width,
+    height: accumulator.height,
+    starEnhance: request.starEnhance,
+  );
+
+  final Uint8List jpegBytes = _finalizeNightImage(finalizeRequest);
+  return _ProcessFramesResult(
+    jpegBytes: jpegBytes,
+    processedFrames: processedFrames,
+  );
 }
 
 class _DecodeFrameRequest {
@@ -961,14 +1042,18 @@ _AlignmentResult _estimateAlignment(
 class _FrameAccumulator {
   _FrameAccumulator(this.width, this.height, Uint8List referenceBytes)
       : sums = Float64List(width * height * 3),
+        sumSquares = Float64List(width * height * 3),
         counts = Int32List(width * height),
-        reference = Uint8List.fromList(referenceBytes);
+        reference = Uint8List.fromList(referenceBytes),
+        maxValues = Uint8List.fromList(referenceBytes);
 
   final int width;
   final int height;
   final Float64List sums;
+  final Float64List sumSquares;
   final Int32List counts;
   final Uint8List reference;
+  final Uint8List maxValues;
 
   void addFrame(Uint8List rgbBytes, {required int dx, required int dy}) {
     final int startX = math.max(0, -dx);
@@ -991,7 +1076,22 @@ class _FrameAccumulator {
         sums[destBase] += rgbBytes[srcPixelIndex];
         sums[destBase + 1] += rgbBytes[srcPixelIndex + 1];
         sums[destBase + 2] += rgbBytes[srcPixelIndex + 2];
+        sumSquares[destBase] += rgbBytes[srcPixelIndex] * rgbBytes[srcPixelIndex];
+        sumSquares[destBase + 1] +=
+            rgbBytes[srcPixelIndex + 1] * rgbBytes[srcPixelIndex + 1];
+        sumSquares[destBase + 2] +=
+            rgbBytes[srcPixelIndex + 2] * rgbBytes[srcPixelIndex + 2];
         counts[destPixelIndex] += 1;
+
+        if (rgbBytes[srcPixelIndex] > maxValues[destBase]) {
+          maxValues[destBase] = rgbBytes[srcPixelIndex];
+        }
+        if (rgbBytes[srcPixelIndex + 1] > maxValues[destBase + 1]) {
+          maxValues[destBase + 1] = rgbBytes[srcPixelIndex + 1];
+        }
+        if (rgbBytes[srcPixelIndex + 2] > maxValues[destBase + 2]) {
+          maxValues[destBase + 2] = rgbBytes[srcPixelIndex + 2];
+        }
       }
     }
   }
@@ -1000,17 +1100,23 @@ class _FrameAccumulator {
 class _FinalizeNightImageRequest {
   const _FinalizeNightImageRequest({
     required this.sums,
+    required this.sumSquares,
     required this.counts,
     required this.reference,
+    required this.maxValues,
     required this.width,
     required this.height,
+    required this.starEnhance,
   });
 
   final Float64List sums;
+  final Float64List sumSquares;
   final Int32List counts;
   final Uint8List reference;
+  final Uint8List maxValues;
   final int width;
   final int height;
+  final bool starEnhance;
 }
 
 Uint8List _finalizeNightImage(_FinalizeNightImageRequest request) {
@@ -1024,6 +1130,9 @@ Uint8List _finalizeNightImage(_FinalizeNightImageRequest request) {
     double r;
     double g;
     double b;
+    double rStd = 0;
+    double gStd = 0;
+    double bStd = 0;
 
     if (count == 0) {
       r = request.reference[base].toDouble();
@@ -1033,6 +1142,44 @@ Uint8List _finalizeNightImage(_FinalizeNightImageRequest request) {
       r = request.sums[base] / count;
       g = request.sums[base + 1] / count;
       b = request.sums[base + 2] / count;
+
+      rStd = _channelStdDev(request.sums[base], request.sumSquares[base], count);
+      gStd = _channelStdDev(
+        request.sums[base + 1],
+        request.sumSquares[base + 1],
+        count,
+      );
+      bStd = _channelStdDev(
+        request.sums[base + 2],
+        request.sumSquares[base + 2],
+        count,
+      );
+    }
+
+    if (request.starEnhance) {
+      r = _highlightBlend(
+        r,
+        request.maxValues[base].toDouble(),
+        rStd,
+      );
+      g = _highlightBlend(
+        g,
+        request.maxValues[base + 1].toDouble(),
+        gStd,
+      );
+      b = _highlightBlend(
+        b,
+        request.maxValues[base + 2].toDouble(),
+        bStd,
+      );
+    }
+
+    final double luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    if (luminance < 38) {
+      final double lift = (38 - luminance) * 0.45;
+      r += lift;
+      g += lift * 0.92;
+      b += lift * 1.05;
     }
 
     toned[base] = _toneMapChannel(r);
@@ -1041,6 +1188,10 @@ Uint8List _finalizeNightImage(_FinalizeNightImageRequest request) {
   }
 
   _applyUnsharpMask(toned, request.width, request.height, amount: 0.4);
+
+  if (request.starEnhance) {
+    _applyColorBalance(toned, request.width, request.height);
+  }
 
   final img.Image image = img.Image.fromBytes(
     width: request.width,
@@ -1067,6 +1218,66 @@ int _toneMapChannel(double value) {
     return 255;
   }
   return result;
+}
+
+double _channelStdDev(double sum, double sumSquares, int count) {
+  if (count <= 0) {
+    return 0;
+  }
+  final double mean = sum / count;
+  final double meanSquares = sumSquares / count;
+  final double variance = math.max(0, meanSquares - mean * mean);
+  return math.sqrt(variance);
+}
+
+double _highlightBlend(double mean, double highlight, double stdDev) {
+  final double boost = math.max(0, highlight - mean);
+  if (boost == 0) {
+    return mean;
+  }
+  final double stability = stdDev + 8;
+  final double weight = (boost / stability).clamp(0.0, 1.0);
+  final double mix = 0.18 + weight * 0.55;
+  final double enhanced = mean * (1 - mix) + highlight * mix;
+  return enhanced.clamp(0.0, 255.0);
+}
+
+void _applyColorBalance(Uint8List data, int width, int height) {
+  final int pixelCount = width * height;
+  for (int i = 0; i < pixelCount; i++) {
+    final int base = i * 3;
+    double r = data[base].toDouble();
+    double g = data[base + 1].toDouble();
+    double b = data[base + 2].toDouble();
+
+    // Cool the white balance slightly to emphasize night skies.
+    r *= 0.96;
+    g *= 1.02;
+    b *= 1.05;
+
+    final double luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    if (luminance < 70) {
+      final double saturationBoost = (70 - luminance) / 140;
+      final double avg = (r + g + b) / 3;
+      r = r + (avg - r) * saturationBoost * -0.15;
+      g = g + (avg - g) * saturationBoost * -0.05;
+      b = b + (avg - b) * saturationBoost * -0.2;
+    }
+
+    data[base] = _clampToByte(r);
+    data[base + 1] = _clampToByte(g);
+    data[base + 2] = _clampToByte(b);
+  }
+}
+
+int _clampToByte(double value) {
+  if (value <= 0) {
+    return 0;
+  }
+  if (value >= 255) {
+    return 255;
+  }
+  return value.round();
 }
 
 void _applyUnsharpMask(Uint8List data, int width, int height,
