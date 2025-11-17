@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:typed_data';
-
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -54,6 +52,21 @@ class _CameraHomeState extends State<CameraHome> {
   static const double _maxAutoIsoBias = 2;
   static const double _defaultAutoIsoBias = -0.25;
 
+  // Shared palette for the refreshed UI.
+  static const Color _accentColor = Color(0xFF4EE3FF);
+  static const Color _accentMuted = Color(0xFF1BA7BA);
+  static const Color _panelColor = Color(0xFF15131F);
+  static const Color _railOverlay = Color(0xCC0D0C13);
+  static const Color _chipBorderColor = Color(0x33FFFFFF);
+  static final WidgetStateProperty<Color?> _switchThumbColor =
+      WidgetStateProperty.resolveWith<Color?>((states) {
+    return states.contains(WidgetState.selected) ? Colors.black : Colors.white60;
+  });
+  static final WidgetStateProperty<Color?> _switchTrackColor =
+      WidgetStateProperty.resolveWith<Color?>((states) {
+    return states.contains(WidgetState.selected) ? _accentColor : Colors.white24;
+  });
+
   CameraController? _controller;
   CameraDescription? _activeCamera;
   bool _isCapturing = false;
@@ -61,7 +74,6 @@ class _CameraHomeState extends State<CameraHome> {
   String? _status;
   String? _lastSavedPath;
   Uint8List? _lastSavedImageBytes;
-  bool _controlsExpanded = false;
 
   double _captureDurationSeconds = 12;
   double _captureFramesPerSecond = 6;
@@ -428,8 +440,9 @@ class _CameraHomeState extends State<CameraHome> {
                     Container(
                       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                       decoration: BoxDecoration(
-                        color: Colors.white10,
+                        color: _panelColor.withValues(alpha: 0.9),
                         borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: _chipBorderColor, width: 1),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -441,6 +454,8 @@ class _CameraHomeState extends State<CameraHome> {
                                   style: TextStyle(color: Colors.white)),
                               Switch.adaptive(
                                 value: flashTemp,
+                                thumbColor: _switchThumbColor,
+                                trackColor: _switchTrackColor,
                                 onChanged: _isCapturing
                                     ? null
                                     : (value) {
@@ -461,8 +476,9 @@ class _CameraHomeState extends State<CameraHome> {
                     Container(
                       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                       decoration: BoxDecoration(
-                        color: Colors.white10,
+                        color: _panelColor.withValues(alpha: 0.9),
                         borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: _chipBorderColor, width: 1),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -474,6 +490,8 @@ class _CameraHomeState extends State<CameraHome> {
                                   style: TextStyle(color: Colors.white)),
                               Switch.adaptive(
                                 value: autoIsoTemp,
+                                thumbColor: _switchThumbColor,
+                                trackColor: _switchTrackColor,
                                 onChanged: (!_isCapturing && exposureAdjustable)
                                     ? (value) {
                                         setSheetState(() {
@@ -496,30 +514,33 @@ class _CameraHomeState extends State<CameraHome> {
                             style: const TextStyle(color: Colors.white54, fontSize: 12),
                           ),
                           const SizedBox(height: 8),
-                          Slider(
-                            value: autoIsoBiasTemp,
-                            min: math.max(_minExposureOffset, _minAutoIsoBias),
-                            max: math.min(_maxExposureOffset, _maxAutoIsoBias),
-                            divisions: exposureAdjustable
-                                ? math.max(
-                                    1,
-                                    ((math.min(_maxExposureOffset, _maxAutoIsoBias) -
-                                                math.max(_minExposureOffset, _minAutoIsoBias)) *
-                                            10)
-                                        .round(),
-                                  )
-                                : 1,
-                            label: autoIsoLabel,
-                            onChanged: (!autoIsoTemp || _isCapturing || !exposureAdjustable)
-                                ? null
-                                : (value) {
-                                    setSheetState(() => autoIsoBiasTemp = value);
-                                    _setAutoIsoBias(value);
-                                  },
+                          SliderTheme(
+                            data: _sliderTheme(sheetContext),
+                            child: Slider(
+                              value: autoIsoBiasTemp,
+                              min: math.max(_minExposureOffset, _minAutoIsoBias),
+                              max: math.min(_maxExposureOffset, _maxAutoIsoBias),
+                              divisions: exposureAdjustable
+                                  ? math.max(
+                                      1,
+                                      ((math.min(_maxExposureOffset, _maxAutoIsoBias) -
+                                                  math.max(_minExposureOffset, _minAutoIsoBias)) *
+                                              10)
+                                          .round(),
+                                    )
+                                  : 1,
+                              label: autoIsoLabel,
+                              onChanged: (!autoIsoTemp || _isCapturing || !exposureAdjustable)
+                                  ? null
+                                  : (value) {
+                                      setSheetState(() => autoIsoBiasTemp = value);
+                                      _setAutoIsoBias(value);
+                                    },
+                            ),
                           ),
                           Text(
                             autoIsoTemp
-                                ? 'Bias ${autoIsoLabel}. Negative favors lower ISO, positive leans brighter.'
+                              ? 'Bias $autoIsoLabel. Negative favors lower ISO, positive leans brighter.'
                                 : 'Enable Auto ISO to tune the bias.',
                             style: const TextStyle(color: Colors.white38, fontSize: 12),
                           ),
@@ -532,6 +553,8 @@ class _CameraHomeState extends State<CameraHome> {
                                   style: TextStyle(color: Colors.white)),
                               Switch.adaptive(
                                 value: manualTemp,
+                                thumbColor: _switchThumbColor,
+                                trackColor: _switchTrackColor,
                                 onChanged: (!_isCapturing && exposureAdjustable)
                                     ? (value) {
                                         setSheetState(() {
@@ -554,24 +577,27 @@ class _CameraHomeState extends State<CameraHome> {
                             style: const TextStyle(color: Colors.white54, fontSize: 12),
                           ),
                           const SizedBox(height: 8),
-                          Slider(
-                            value: offsetTemp,
-                            min: _minExposureOffset,
-                            max: _maxExposureOffset,
-                            divisions: exposureAdjustable
-                                ? math.max(
-                                    1,
-                                    ((_maxExposureOffset - _minExposureOffset) * 10)
-                                        .round(),
-                                  )
-                                : 1,
-                            label: 'EV ${offsetTemp.toStringAsFixed(1)}',
-                            onChanged: (!manualTemp || _isCapturing || !exposureAdjustable)
-                                ? null
-                                : (value) {
-                                    setSheetState(() => offsetTemp = value);
-                                    _setManualExposureOffset(value);
-                                  },
+                          SliderTheme(
+                            data: _sliderTheme(sheetContext),
+                            child: Slider(
+                              value: offsetTemp,
+                              min: _minExposureOffset,
+                              max: _maxExposureOffset,
+                              divisions: exposureAdjustable
+                                  ? math.max(
+                                      1,
+                                      ((_maxExposureOffset - _minExposureOffset) * 10)
+                                          .round(),
+                                    )
+                                  : 1,
+                              label: 'EV ${offsetTemp.toStringAsFixed(1)}',
+                              onChanged: (!manualTemp || _isCapturing || !exposureAdjustable)
+                                  ? null
+                                  : (value) {
+                                      setSheetState(() => offsetTemp = value);
+                                      _setManualExposureOffset(value);
+                                    },
+                            ),
                           ),
                           const Text(
                             'Slide left to shorten exposure (lower ISO) or right to brighten (higher ISO). Hold the phone steady when pushing ISO high.',
@@ -953,173 +979,384 @@ class _CameraHomeState extends State<CameraHome> {
 
   @override
   Widget build(BuildContext context) {
-    final controller = _controller;
-    final Size screenSize = MediaQuery.of(context).size;
+    final CameraController? controller = _controller;
+
+    Widget content;
+    if (controller == null || !controller.value.isInitialized) {
+      content = _buildInitializationState();
+    } else {
+      content = Stack(
+        children: [
+          Column(
+            children: [
+              _buildPreviewSection(context, controller),
+              Expanded(child: _buildBottomControls(context)),
+            ],
+          ),
+          if (_isCapturing)
+            Positioned.fill(
+              child: AbsorbPointer(
+                absorbing: true,
+                child: _buildProgressOverlay(),
+              ),
+            ),
+        ],
+      );
+    }
 
     return Scaffold(
-      body: SafeArea(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (controller != null && controller.value.isInitialized)
-              _buildCameraPreview(screenSize, controller),
-            if (controller == null || !controller.value.isInitialized)
-              const Center(
-                child: CircularProgressIndicator(),
-              ),
-            _buildOverlay(context),
-            if (_isCapturing) _buildProgressOverlay(),
-          ],
-        ),
-      ),
+      backgroundColor: Colors.black,
+      body: SafeArea(child: content),
     );
   }
 
-  Widget _buildOverlay(BuildContext context) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        _buildTopBar(),
-        _buildBottomPanel(context),
-      ],
+  Widget _buildInitializationState() {
+    final String? message = _status;
+    if (message != null && message.isNotEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            message,
+            style: const TextStyle(color: Colors.white70, fontSize: 16),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    return const Center(
+      child: CircularProgressIndicator(),
+    );
+  }
+
+  Widget _buildPreviewSection(BuildContext context, CameraController controller) {
+    final double aspectRatio =
+        controller.value.aspectRatio == 0 ? 1 : 1 / controller.value.aspectRatio;
+
+    return AspectRatio(
+      aspectRatio: aspectRatio,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          CameraPreview(controller),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _buildTopBar(),
+          ),
+          Positioned(
+            top: 0,
+            bottom: 0,
+            right: 0,
+            child: _buildRightRail(),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: _buildPrimaryCaptureControls(context),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildTopBar() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Align(
-            alignment: Alignment.center,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Colors.black.withAlpha((0.35 * 255).round()),
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Text(
-                  _status ?? 'READY',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 1.1,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ),
-          ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: GestureDetector(
-              onTap: _isCapturing ? null : _openSettingsSheet,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.black.withAlpha((0.4 * 255).round()),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                padding: const EdgeInsets.all(8),
-                child: const Icon(Icons.settings_outlined, color: Colors.white70),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+    final String statusLabel = (_status ?? 'READY').toUpperCase();
 
-  Widget _buildBottomPanel(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.bottomCenter,
-          end: Alignment.topCenter,
-          colors: [Colors.black, Colors.transparent],
-        ),
-      ),
-      padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        bottom: 24 + MediaQuery.of(context).padding.bottom,
-        top: 16,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildControlHandle(),
-          AnimatedCrossFade(
-            firstChild: const SizedBox.shrink(),
-            secondChild: Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (_lastSavedPath != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Text(
-                        'Saved last to Photos',
-                        style: const TextStyle(color: Colors.white54, fontSize: 12),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  _buildCapturePlanner(),
-                  if (_focusSupported) ...[
-                    const SizedBox(height: 16),
-                    _buildAutoFocusToggle(),
-                    if (!_autoFocusEnabled) ...[
-                      const SizedBox(height: 12),
-                      _buildFocusSlider(),
-                    ],
-                  ],
-                ],
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: _panelColor.withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: _chipBorderColor, width: 1),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Text(
+                statusLabel,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.05,
+                ),
               ),
             ),
-            crossFadeState:
-                _controlsExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 220),
           ),
-          const SizedBox(height: 12),
-          _buildCaptureBar(context),
+          const SizedBox(width: 12),
+          GestureDetector(
+            onTap: _isCapturing ? null : _openSettingsSheet,
+            child: Container(
+              decoration: BoxDecoration(
+                color: _panelColor.withValues(alpha: _isCapturing ? 0.5 : 0.9),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: _chipBorderColor, width: 1),
+              ),
+              padding: const EdgeInsets.all(10),
+              child: Icon(
+                Icons.settings_outlined,
+                color: _isCapturing ? Colors.white38 : _accentColor,
+                size: 20,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildControlHandle() {
-    return Center(
-      child: GestureDetector(
-        onTap: () => setState(() => _controlsExpanded = !_controlsExpanded),
-        behavior: HitTestBehavior.translucent,
+  Widget _buildRightRail() {
+    final bool manual = _manualExposureEnabled;
+    final bool autoIso = _autoIsoEnabled;
+    final double evStops = manual
+        ? _manualExposureOffset
+        : autoIso
+            ? _autoIsoBias
+            : _fastShutterBias;
+    final String modeLabel = manual
+        ? 'Manual exposure'
+        : autoIso
+            ? 'Auto ISO bias'
+            : 'Fast shutter';
+    final String evLabel =
+        evStops >= 0 ? '+${evStops.toStringAsFixed(1)} EV' : '${evStops.toStringAsFixed(1)} EV';
+    final int isoEstimate = _estimateIsoFromEv(evStops);
+
+    final int frameCount = _targetFrameCount;
+    final double sequenceSeconds = frameCount / _captureFramesPerSecond;
+    final String stackSummary = '$frameCount frames';
+    final String durationSummary = '${sequenceSeconds.toStringAsFixed(1)} s stack';
+
+    final bool flashEnabled = _flashAllowed;
+
+    return Align(
+      alignment: Alignment.topRight,
+      child: SafeArea(
+        minimum: const EdgeInsets.only(top: 16, right: 16),
         child: Container(
-          padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.white.withAlpha((0.12 * 255).round()),
-            borderRadius: BorderRadius.circular(16),
+            color: _railOverlay,
+            borderRadius: BorderRadius.circular(18),
           ),
-          child: Icon(
-            _controlsExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
-            color: Colors.white,
+          padding: const EdgeInsets.fromLTRB(10, 12, 10, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _buildRailCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      modeLabel,
+                      style: const TextStyle(color: Colors.white54, fontSize: 11),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'ISO $isoEstimate',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      evLabel,
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _buildRailCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      stackSummary,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      durationSummary,
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _buildRailCard(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      flashEnabled ? Icons.flash_auto : Icons.flash_off,
+                      color: Colors.white70,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      flashEnabled ? 'Flash auto' : 'Flash off',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildCaptureBar(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        _buildPreviewButton(),
-        _buildCaptureButton(context),
-        _buildSwitcherButton(),
-      ],
+  Widget _buildRailCard({required Widget child}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _panelColor.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _chipBorderColor, width: 1),
+        boxShadow: const [
+          BoxShadow(blurRadius: 18, color: Colors.black54, offset: Offset(0, 6)),
+        ],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      child: child,
+    );
+  }
+
+  int _estimateIsoFromEv(double ev) {
+    final double iso = 100 * math.pow(2.0, ev).toDouble();
+    final double clamped = iso.clamp(25.0, 12800.0);
+    return clamped.round();
+  }
+
+  SliderThemeData _sliderTheme(BuildContext context) {
+    final SliderThemeData base = SliderTheme.of(context);
+    return base.copyWith(
+      trackHeight: 3.2,
+      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+      overlayShape: const RoundSliderOverlayShape(overlayRadius: 18),
+      activeTrackColor: _accentColor,
+      inactiveTrackColor: Colors.white12,
+      thumbColor: _accentColor,
+      overlayColor: _accentColor.withValues(alpha: 0.2),
+      valueIndicatorColor: _panelColor,
+      activeTickMarkColor: Colors.white24,
+      inactiveTickMarkColor: Colors.white10,
+    );
+  }
+
+  Widget _buildPresetChip({
+    required String label,
+    required bool selected,
+    required VoidCallback? onTap,
+  }) {
+    return ChoiceChip(
+      label: Text(label),
+      showCheckmark: false,
+      side: BorderSide(color: selected ? _accentColor : _chipBorderColor),
+      backgroundColor: Colors.white.withValues(alpha: 0.04),
+      selectedColor: _accentColor.withValues(alpha: 0.2),
+      labelStyle: TextStyle(
+        color: selected ? Colors.white : Colors.white70,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+      ),
+      onSelected: onTap == null ? null : (_) => onTap(),
+      selected: selected,
+    );
+  }
+
+  Widget _buildPrimaryCaptureControls(BuildContext context) {
+    return SafeArea(
+      minimum: const EdgeInsets.only(left: 24, right: 24, bottom: 24),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          _buildPreviewButton(),
+          _buildCaptureButton(context),
+          Container(
+            decoration: BoxDecoration(
+              color: _panelColor.withValues(alpha: _isCapturing ? 0.4 : 0.85),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: _chipBorderColor, width: 1),
+            ),
+            child: IconButton(
+              iconSize: 28,
+              splashRadius: 24,
+              color: _isCapturing ? Colors.white38 : _accentColor,
+              onPressed:
+                  _isCapturing || widget.cameras.length < 2 ? null : _switchCamera,
+              icon: const Icon(Icons.cameraswitch),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomControls(BuildContext context) {
+    final double bottomPadding = MediaQuery.of(context).padding.bottom;
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: _panelColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        border: Border.all(color: _chipBorderColor, width: 1),
+        boxShadow: const [
+          BoxShadow(blurRadius: 24, color: Colors.black54, offset: Offset(0, -6)),
+        ],
+      ),
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: 20 + bottomPadding,
+      ),
+      child: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 38,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: _accentMuted.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            if (_lastSavedPath != null) ...[
+              const Text(
+                'Saved last to Photos',
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+            ],
+            _buildCapturePlanner(),
+            if (_focusSupported) ...[
+              const SizedBox(height: 20),
+              _buildAutoFocusToggle(),
+              if (!_autoFocusEnabled) ...[
+                const SizedBox(height: 12),
+                _buildFocusSlider(),
+              ],
+            ],
+          ],
+        ),
+      ),
     );
   }
 
@@ -1132,8 +1369,8 @@ class _CameraHomeState extends State<CameraHome> {
         height: 52,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white24, width: 2),
-          color: Colors.white10,
+          border: Border.all(color: _chipBorderColor, width: 1.5),
+          color: _panelColor.withValues(alpha: 0.85),
         ),
         clipBehavior: Clip.hardEdge,
         child: previewBytes != null
@@ -1145,7 +1382,7 @@ class _CameraHomeState extends State<CameraHome> {
             : const Center(
                 child: Icon(
                   Icons.photo_library_outlined,
-                  color: Colors.white70,
+                  color: _accentColor,
                 ),
               ),
       ),
@@ -1187,15 +1424,6 @@ class _CameraHomeState extends State<CameraHome> {
     );
   }
 
-  Widget _buildSwitcherButton() {
-    return IconButton(
-      iconSize: 32,
-      color: Colors.white,
-      onPressed: _isCapturing || widget.cameras.length < 2 ? null : _switchCamera,
-      icon: const Icon(Icons.cameraswitch),
-    );
-  }
-
   Widget _buildCapturePlanner() {
     final int plannedFrames = _plannedFrameCount;
     final int targetFrames = _targetFrameCount;
@@ -1231,19 +1459,22 @@ class _CameraHomeState extends State<CameraHome> {
                 style: const TextStyle(color: Colors.white70)),
           ],
         ),
-        Slider(
-          value: durationValue,
-          min: _minDurationSeconds,
-          max: _maxDurationSeconds,
-          divisions: ((_maxDurationSeconds - _minDurationSeconds) * 2).round(),
-          label: '${durationValue.toStringAsFixed(1)}s',
-          onChanged: _isCapturing
-              ? null
-              : (value) {
-                  setState(() {
-                    _captureDurationSeconds = value;
-                  });
-                },
+        SliderTheme(
+          data: _sliderTheme(context),
+          child: Slider(
+            value: durationValue,
+            min: _minDurationSeconds,
+            max: _maxDurationSeconds,
+            divisions: ((_maxDurationSeconds - _minDurationSeconds) * 2).round(),
+            label: '${durationValue.toStringAsFixed(1)}s',
+            onChanged: _isCapturing
+                ? null
+                : (value) {
+                    setState(() {
+                      _captureDurationSeconds = value;
+                    });
+                  },
+          ),
         ),
         if (durationPresets.isNotEmpty)
           Wrap(
@@ -1251,25 +1482,20 @@ class _CameraHomeState extends State<CameraHome> {
             runSpacing: 6,
             children: durationPresets
                 .map(
-                  (preset) => ChoiceChip(
-                    label: Text('${preset.toStringAsFixed(0)} s'),
-                    selectedColor: Colors.white24,
-                    labelStyle: TextStyle(
-                      color: (durationValue - preset).abs() < 0.25
-                          ? Colors.white
-                          : Colors.white70,
-                    ),
-                    selected: (durationValue - preset).abs() < 0.25,
-                    onSelected: _isCapturing
-                        ? null
-                        : (selected) {
-                            if (selected) {
+                  (preset) {
+                    final bool selected = (durationValue - preset).abs() < 0.25;
+                    return _buildPresetChip(
+                      label: '${preset.toStringAsFixed(0)} s',
+                      selected: selected,
+                      onTap: _isCapturing
+                          ? null
+                          : () {
                               setState(() {
                                 _captureDurationSeconds = preset;
                               });
-                            }
-                          },
-                  ),
+                            },
+                    );
+                  },
                 )
                 .toList(),
           ),
@@ -1282,19 +1508,22 @@ class _CameraHomeState extends State<CameraHome> {
                 style: const TextStyle(color: Colors.white70)),
           ],
         ),
-        Slider(
-          value: fpsValue,
-          min: _minFramesPerSecond,
-          max: _maxFramesPerSecond,
-          divisions: ((_maxFramesPerSecond - _minFramesPerSecond) * 2).round(),
-          label: '${fpsValue.toStringAsFixed(1)} fps',
-          onChanged: _isCapturing
-              ? null
-              : (value) {
-                  setState(() {
-                    _captureFramesPerSecond = value;
-                  });
-                },
+        SliderTheme(
+          data: _sliderTheme(context),
+          child: Slider(
+            value: fpsValue,
+            min: _minFramesPerSecond,
+            max: _maxFramesPerSecond,
+            divisions: ((_maxFramesPerSecond - _minFramesPerSecond) * 2).round(),
+            label: '${fpsValue.toStringAsFixed(1)} fps',
+            onChanged: _isCapturing
+                ? null
+                : (value) {
+                    setState(() {
+                      _captureFramesPerSecond = value;
+                    });
+                  },
+          ),
         ),
         if (fpsPresets.isNotEmpty)
           Wrap(
@@ -1302,25 +1531,20 @@ class _CameraHomeState extends State<CameraHome> {
             runSpacing: 6,
             children: fpsPresets
                 .map(
-                  (preset) => ChoiceChip(
-                    label: Text('${preset.toStringAsFixed(0)} fps'),
-                    selectedColor: Colors.white24,
-                    labelStyle: TextStyle(
-                      color: (fpsValue - preset).abs() < 0.25
-                          ? Colors.white
-                          : Colors.white70,
-                    ),
-                    selected: (fpsValue - preset).abs() < 0.25,
-                    onSelected: _isCapturing
-                        ? null
-                        : (selected) {
-                            if (selected) {
+                  (preset) {
+                    final bool selected = (fpsValue - preset).abs() < 0.25;
+                    return _buildPresetChip(
+                      label: '${preset.toStringAsFixed(0)} fps',
+                      selected: selected,
+                      onTap: _isCapturing
+                          ? null
+                          : () {
                               setState(() {
                                 _captureFramesPerSecond = preset;
                               });
-                            }
-                          },
-                  ),
+                            },
+                    );
+                  },
                 )
                 .toList(),
           ),
@@ -1345,6 +1569,8 @@ class _CameraHomeState extends State<CameraHome> {
             const Text('Star highlight boost', style: TextStyle(color: Colors.white)),
             Switch.adaptive(
               value: _starEnhance,
+              thumbColor: _switchThumbColor,
+              trackColor: _switchTrackColor,
               onChanged: _isCapturing ? null : _setStarEnhance,
             ),
           ],
@@ -1368,11 +1594,14 @@ class _CameraHomeState extends State<CameraHome> {
             Text('Near                Far', style: TextStyle(color: Colors.white54)),
           ],
         ),
-        Slider(
-          value: _focusDepth,
-          min: 0,
-          max: 1,
-          onChanged: _isCapturing ? null : _changeFocus,
+        SliderTheme(
+          data: _sliderTheme(context),
+          child: Slider(
+            value: _focusDepth,
+            min: 0,
+            max: 1,
+            onChanged: _isCapturing ? null : _changeFocus,
+          ),
         ),
       ],
     );
@@ -1385,9 +1614,8 @@ class _CameraHomeState extends State<CameraHome> {
         const Text('Auto focus', style: TextStyle(color: Colors.white)),
         Switch.adaptive(
           value: _autoFocusEnabled,
-          activeTrackColor: Colors.white60,
-          inactiveThumbColor: Colors.white70,
-          inactiveTrackColor: Colors.white24,
+          thumbColor: _switchThumbColor,
+          trackColor: _switchTrackColor,
           onChanged: _isCapturing ? null : _setAutoFocusEnabled,
         ),
       ],
@@ -1402,8 +1630,11 @@ class _CameraHomeState extends State<CameraHome> {
         padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(color: Colors.white.withAlpha((0.6 * 255).round()), width: 4),
-          color: Colors.white.withAlpha(((_isCapturing ? 0.15 : 0.05) * 255).round()),
+          border: Border.all(
+            color: _accentColor.withValues(alpha: _isCapturing ? 0.7 : 0.4),
+            width: 4,
+          ),
+          color: _panelColor.withValues(alpha: 0.8),
         ),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
@@ -1411,7 +1642,7 @@ class _CameraHomeState extends State<CameraHome> {
           height: 84,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: _isCapturing ? Colors.white54 : Colors.white,
+            color: _isCapturing ? _accentMuted : Colors.white,
           ),
           child: _isCapturing
               ? const Center(
@@ -1422,27 +1653,6 @@ class _CameraHomeState extends State<CameraHome> {
                   ),
                 )
               : null,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCameraPreview(Size screenSize, CameraController controller) {
-    final previewSize = controller.value.previewSize;
-    if (previewSize == null || previewSize.height == 0) {
-      return const SizedBox.shrink();
-    }
-
-    return SizedBox(
-      width: screenSize.width,
-      height: screenSize.height,
-      child: FittedBox(
-        fit: BoxFit.contain,
-        alignment: Alignment.center,
-        child: SizedBox(
-          width: previewSize.width,
-          height: previewSize.height,
-          child: CameraPreview(controller),
         ),
       ),
     );
