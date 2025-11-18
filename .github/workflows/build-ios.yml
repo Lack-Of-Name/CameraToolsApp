@@ -19,11 +19,19 @@ jobs:
     - name: Install dependencies
       run: flutter pub get
 
-    - name: Build IPA (unsigned)
-      run: flutter build ipa --release --no-codesign
+    - name: Build iOS (unsigned)
+      run: flutter build ios --release --no-codesign
+
+    - name: Package Runner.app as IPA
+      run: |
+        cd build/ios/iphoneos
+        rm -rf Payload Runner.ipa
+        mkdir Payload
+        cp -R Runner.app Payload/
+        zip -r Runner.ipa Payload
 
     - name: Upload app bundle
       uses: actions/upload-artifact@v4
       with:
         name: livecontainer-app
-        path: build/ios/ipa/*.ipa
+        path: build/ios/iphoneos/Runner.ipa
