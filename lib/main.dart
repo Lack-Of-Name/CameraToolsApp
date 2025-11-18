@@ -41,6 +41,15 @@ class CameraHome extends StatefulWidget {
   State<CameraHome> createState() => _CameraHomeState();
 }
 
+enum _AdjustmentKind {
+  duration,
+  fps,
+  focus,
+  autoIso,
+  manualExposure,
+  starEnhance,
+}
+
 class _CameraHomeState extends State<CameraHome> {
   static const int _maxFrameCount = 180;
   static const double _fastShutterBias = -1.5;
@@ -56,7 +65,6 @@ class _CameraHomeState extends State<CameraHome> {
   static const Color _accentColor = Color(0xFF4EE3FF);
   static const Color _accentMuted = Color(0xFF1BA7BA);
   static const Color _panelColor = Color(0xFF15131F);
-  static const Color _railOverlay = Color(0xCC0D0C13);
   static const Color _chipBorderColor = Color(0x33FFFFFF);
   static final WidgetStateProperty<Color?> _switchThumbColor =
       WidgetStateProperty.resolveWith<Color?>((states) {
@@ -88,6 +96,9 @@ class _CameraHomeState extends State<CameraHome> {
   double _manualExposureOffset = 0;
   double _minExposureOffset = -2;
   double _maxExposureOffset = 2;
+  _AdjustmentKind? _activeAdjustment;
+  bool _adjustmentsExpanded = false;
+  bool _showThirdsOverlay = false;
 
   Timer? _focusDebounce;
 
@@ -97,6 +108,8 @@ class _CameraHomeState extends State<CameraHome> {
   int get _targetFrameCount => math.min(_plannedFrameCount, _maxFrameCount);
 
   bool get _isFrameCountClamped => _plannedFrameCount > _maxFrameCount;
+
+  bool get _exposureAdjustable => _maxExposureOffset > _minExposureOffset + 0.0001;
 
   Future<void> _setAutoFocusEnabled(bool value) async {
     if (!_focusSupported) {
@@ -382,31 +395,9 @@ class _CameraHomeState extends State<CameraHome> {
       ),
       builder: (sheetContext) {
         bool flashTemp = _flashAllowed;
-        bool manualTemp = _manualExposureEnabled;
-        bool autoIsoTemp = _autoIsoEnabled;
-        double offsetTemp =
-            _manualExposureOffset.clamp(_minExposureOffset, _maxExposureOffset);
-        double autoIsoBiasTemp =
-            _autoIsoBias.clamp(_minExposureOffset, _maxExposureOffset);
 
         return StatefulBuilder(
           builder: (sheetContext, setSheetState) {
-            final bool exposureAdjustable =
-                _maxExposureOffset > _minExposureOffset + 0.0001;
-            autoIsoBiasTemp = autoIsoBiasTemp.clamp(
-              math.max(_minExposureOffset, _minAutoIsoBias),
-              math.min(_maxExposureOffset, _maxAutoIsoBias),
-            );
-            offsetTemp = offsetTemp.clamp(_minExposureOffset, _maxExposureOffset);
-            final double isoApprox =
-              (100 * math.pow(2, offsetTemp)).toDouble();
-            final String isoLabel = isoApprox >= 1000
-                ? 'ISO ${isoApprox.round()}'
-                : 'ISO ${isoApprox.toStringAsFixed(0)}';
-            final String autoIsoLabel =
-                autoIsoBiasTemp >= 0 ? '+${autoIsoBiasTemp.toStringAsFixed(1)} EV' :
-                '${autoIsoBiasTemp.toStringAsFixed(1)} EV';
-
             return Padding(
               padding: EdgeInsets.only(
                 left: 20,
@@ -473,140 +464,11 @@ class _CameraHomeState extends State<CameraHome> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: _panelColor.withValues(alpha: 0.9),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: _chipBorderColor, width: 1),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text('Auto ISO balancing',
-                                  style: TextStyle(color: Colors.white)),
-                              Switch.adaptive(
-                                value: autoIsoTemp,
-                                thumbColor: _switchThumbColor,
-                                trackColor: _switchTrackColor,
-                                onChanged: (!_isCapturing && exposureAdjustable)
-                                    ? (value) {
-                                        setSheetState(() {
-                                          autoIsoTemp = value;
-                                          if (value) {
-                                            manualTemp = false;
-                                          }
-                                        });
-                                        _setAutoIsoEnabled(value);
-                                      }
-                                    : null,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            exposureAdjustable
-                                ? 'Let NightPlus trim or boost ISO between frames for a steadier brightness.'
-                                : 'Auto ISO requires cameras that expose EV adjustments.',
-                            style: const TextStyle(color: Colors.white54, fontSize: 12),
-                          ),
-                          const SizedBox(height: 8),
-                          SliderTheme(
-                            data: _sliderTheme(sheetContext),
-                            child: Slider(
-                              value: autoIsoBiasTemp,
-                              min: math.max(_minExposureOffset, _minAutoIsoBias),
-                              max: math.min(_maxExposureOffset, _maxAutoIsoBias),
-                              divisions: exposureAdjustable
-                                  ? math.max(
-                                      1,
-                                      ((math.min(_maxExposureOffset, _maxAutoIsoBias) -
-                                                  math.max(_minExposureOffset, _minAutoIsoBias)) *
-                                              10)
-                                          .round(),
-                                    )
-                                  : 1,
-                              label: autoIsoLabel,
-                              onChanged: (!autoIsoTemp || _isCapturing || !exposureAdjustable)
-                                  ? null
-                                  : (value) {
-                                      setSheetState(() => autoIsoBiasTemp = value);
-                                      _setAutoIsoBias(value);
-                                    },
-                            ),
-                          ),
-                          Text(
-                            autoIsoTemp
-                              ? 'Bias $autoIsoLabel. Negative favors lower ISO, positive leans brighter.'
-                                : 'Enable Auto ISO to tune the bias.',
-                            style: const TextStyle(color: Colors.white38, fontSize: 12),
-                          ),
-                          const SizedBox(height: 16),
-                          const Divider(color: Colors.white12, height: 24),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text('Manual exposure',
-                                  style: TextStyle(color: Colors.white)),
-                              Switch.adaptive(
-                                value: manualTemp,
-                                thumbColor: _switchThumbColor,
-                                trackColor: _switchTrackColor,
-                                onChanged: (!_isCapturing && exposureAdjustable)
-                                    ? (value) {
-                                        setSheetState(() {
-                                          manualTemp = value;
-                                          if (value) {
-                                            autoIsoTemp = false;
-                                          }
-                                        });
-                                        _setManualExposureEnabled(value);
-                                      }
-                                    : null,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            exposureAdjustable
-                                ? 'EV ${offsetTemp.toStringAsFixed(1)} · $isoLabel'
-                                : 'This camera does not expose manual EV controls.',
-                            style: const TextStyle(color: Colors.white54, fontSize: 12),
-                          ),
-                          const SizedBox(height: 8),
-                          SliderTheme(
-                            data: _sliderTheme(sheetContext),
-                            child: Slider(
-                              value: offsetTemp,
-                              min: _minExposureOffset,
-                              max: _maxExposureOffset,
-                              divisions: exposureAdjustable
-                                  ? math.max(
-                                      1,
-                                      ((_maxExposureOffset - _minExposureOffset) * 10)
-                                          .round(),
-                                    )
-                                  : 1,
-                              label: 'EV ${offsetTemp.toStringAsFixed(1)}',
-                              onChanged: (!manualTemp || _isCapturing || !exposureAdjustable)
-                                  ? null
-                                  : (value) {
-                                      setSheetState(() => offsetTemp = value);
-                                      _setManualExposureOffset(value);
-                                    },
-                            ),
-                          ),
-                          const Text(
-                            'Slide left to shorten exposure (lower ISO) or right to brighten (higher ISO). Hold the phone steady when pushing ISO high.',
-                            style: TextStyle(color: Colors.white38, fontSize: 12),
-                          ),
-                        ],
-                      ),
+                    Text(
+                      'Use the adjustments menu on the top right for capture planning, focus, ISO bias, manual EV, and thirds overlays.',
+                      style: const TextStyle(color: Colors.white54, height: 1.3),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     Text(
                       'NightPlus captures up to $_maxFrameCount frames. Combine manual EV with the capture planner for the best blend of detail and low noise.',
                       style: const TextStyle(color: Colors.white54, height: 1.3),
@@ -981,37 +843,50 @@ class _CameraHomeState extends State<CameraHome> {
   Widget build(BuildContext context) {
     final CameraController? controller = _controller;
 
-    Widget content;
     if (controller == null || !controller.value.isInitialized) {
-      content = _buildInitializationState();
-    } else {
-      content = Stack(
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: _buildInitializationState(),
+      );
+    }
+
+    final Orientation orientation = MediaQuery.of(context).orientation;
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
         children: [
-          Column(
-            children: [
-              _buildPreviewSection(context, controller),
-              Expanded(child: _buildBottomControls(context)),
-            ],
+          Positioned.fill(child: _buildCameraSurface(context, controller)),
+          if (_showThirdsOverlay)
+            const Positioned.fill(
+              child: IgnorePointer(child: _RuleOfThirdsOverlay()),
+            ),
+          Align(
+            alignment: Alignment.topCenter,
+            child: _buildTopChrome(context),
           ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: _buildBottomChrome(context, orientation),
+          ),
+          Positioned.fill(child: _buildAdjustmentsTray(context)),
+          if (_activeAdjustment != null)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _activeAdjustment = null),
+                child: const SizedBox.shrink(),
+              ),
+            ),
+          if (_activeAdjustment != null)
+            _buildAdjustmentPanel(context),
           if (_isCapturing)
             Positioned.fill(
               child: AbsorbPointer(
-                absorbing: true,
                 child: _buildProgressOverlay(),
               ),
             ),
         ],
-      );
-    }
-
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        top: true,
-        bottom: false,
-        left: false,
-        right: false,
-        child: content,
       ),
     );
   }
@@ -1035,212 +910,643 @@ class _CameraHomeState extends State<CameraHome> {
     );
   }
 
-  Widget _buildPreviewSection(BuildContext context, CameraController controller) {
-    final double aspectRatio =
-        controller.value.aspectRatio == 0 ? 1 : 1 / controller.value.aspectRatio;
-    final double safeTop = MediaQuery.of(context).padding.top;
-    const double topBarHeight = 64;
-    final double railTop = safeTop + topBarHeight + 12;
+  Widget _buildCameraSurface(BuildContext context, CameraController controller) {
+    final previewSize = controller.value.previewSize;
+    if (previewSize == null || previewSize.height == 0) {
+      return const ColoredBox(color: Colors.black);
+    }
+    if (previewSize.width == 0 || previewSize.height == 0) {
+      return const ColoredBox(color: Colors.black);
+    }
 
-    return AspectRatio(
-      aspectRatio: aspectRatio,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          CameraPreview(controller),
-          Positioned(
-            top: railTop,
-            bottom: 0,
-            right: 0,
-            child: Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: _buildRightRail(),
+    final Orientation orientation = MediaQuery.of(context).orientation;
+    final bool isPortrait = orientation == Orientation.portrait;
+    final double displayWidth = isPortrait ? previewSize.height : previewSize.width;
+    final double displayHeight = isPortrait ? previewSize.width : previewSize.height;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return ClipRect(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: displayWidth,
+              height: displayHeight,
+              child: CameraPreview(controller),
             ),
           ),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              top: true,
-              bottom: false,
-              child: _buildTopBar(),
-            ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTopChrome(BuildContext context) {
+    final String statusLabel = (_status ?? 'Ready').toUpperCase();
+
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+        child: SizedBox(
+          height: 54,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _buildSettingsButton(),
+              ),
+              Align(
+                alignment: Alignment.center,
+                child: _buildStatusChip(statusLabel),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: _buildAdjustmentsToggle(),
+              ),
+            ],
           ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: _buildPrimaryCaptureControls(context),
-          ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildTopBar() {
-    final String statusLabel = (_status ?? 'READY').toUpperCase();
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: _panelColor.withValues(alpha: 0.85),
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: _chipBorderColor, width: 1),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              child: Text(
-                statusLabel,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.05,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          GestureDetector(
-            onTap: _isCapturing ? null : _openSettingsSheet,
-            child: Container(
-              decoration: BoxDecoration(
-                color: _panelColor.withValues(alpha: _isCapturing ? 0.5 : 0.9),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: _chipBorderColor, width: 1),
-              ),
-              padding: const EdgeInsets.all(10),
-              child: Icon(
-                Icons.settings_outlined,
-                color: _isCapturing ? Colors.white38 : _accentColor,
-                size: 20,
-              ),
-            ),
-          ),
-        ],
+  Widget _buildStatusChip(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _chipBorderColor),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 1.05,
+        ),
       ),
     );
   }
 
-  Widget _buildRightRail() {
+  Widget _buildSettingsButton() {
+    return _topChromeButton(
+      icon: Icons.settings_outlined,
+      onPressed: _isCapturing ? null : _openSettingsSheet,
+    );
+  }
+
+  Widget _buildAdjustmentsToggle() {
+    return _topChromeButton(
+      icon: _adjustmentsExpanded ? Icons.close_fullscreen : Icons.tune,
+      highlight: _adjustmentsExpanded,
+      onPressed: () {
+        setState(() {
+          _adjustmentsExpanded = !_adjustmentsExpanded;
+          if (!_adjustmentsExpanded) {
+            _activeAdjustment = null;
+          }
+        });
+      },
+    );
+  }
+
+  Widget _topChromeButton({
+    required IconData icon,
+    VoidCallback? onPressed,
+    bool highlight = false,
+  }) {
+    final bool enabled = onPressed != null;
+    final Color background = highlight
+        ? _accentColor.withValues(alpha: 0.25)
+        : Colors.black.withValues(alpha: 0.35);
+    final Color iconColor = highlight
+        ? _accentColor
+        : enabled
+            ? Colors.white
+            : Colors.white24;
+
+    return Material(
+      color: background,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Icon(icon, color: iconColor, size: 22),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomChrome(BuildContext context, Orientation orientation) {
+    final double bottomPadding = MediaQuery.of(context).padding.bottom;
+    final bool isLandscape = orientation == Orientation.landscape;
+    final double horizontalPadding = isLandscape ? 32 : 24;
+
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Container(
+        width: double.infinity,
+        padding:
+            EdgeInsets.fromLTRB(horizontalPadding, 20, horizontalPadding, bottomPadding + 24),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+            colors: [Color(0xCC000000), Color(0x00000000)],
+            stops: [0, 1],
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildCaptureSummaryRow(),
+            const SizedBox(height: 16),
+            _buildPrimaryCaptureControls(context),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCaptureSummaryRow() {
+    final int frameCount = _targetFrameCount;
+    final double duration = _captureDurationSeconds;
+    final double fps = _captureFramesPerSecond;
     final bool manual = _manualExposureEnabled;
     final bool autoIso = _autoIsoEnabled;
     final double evStops = manual
-        ? _manualExposureOffset
-        : autoIso
-            ? _autoIsoBias
-            : _fastShutterBias;
-    final String modeLabel = manual
-        ? 'Manual exposure'
-        : autoIso
-            ? 'Auto ISO bias'
-            : 'Fast shutter';
-    final String evLabel =
-        evStops >= 0 ? '+${evStops.toStringAsFixed(1)} EV' : '${evStops.toStringAsFixed(1)} EV';
+      ? _manualExposureOffset
+      : autoIso
+        ? _autoIsoBias
+        : _fastShutterBias;
     final int isoEstimate = _estimateIsoFromEv(evStops);
+    final String focusLabel = _autoFocusEnabled
+        ? 'AF'
+        : 'MF ${(100 * _focusDepth).clamp(0, 100).toStringAsFixed(0)}%';
+    final String exposureLabel = manual
+      ? 'Manual ${_manualExposureOffset.toStringAsFixed(1)} EV'
+      : autoIso
+        ? 'Auto ISO ${_autoIsoBias.toStringAsFixed(1)}'
+        : (_flashAllowed ? 'Flash auto' : 'Fast shutter');
+    final String isoLabel = 'ISO $isoEstimate';
 
-    final int frameCount = _targetFrameCount;
-    final double sequenceSeconds = frameCount / _captureFramesPerSecond;
-    final String stackSummary = '$frameCount frames';
-    final String durationSummary = '${sequenceSeconds.toStringAsFixed(1)} s stack';
+    final List<Widget> pills = [
+      _buildSummaryPill('${duration.toStringAsFixed(1)} s'),
+      _buildSummaryPill('${fps.toStringAsFixed(1)} fps'),
+      _buildSummaryPill('$frameCount frames'),
+      _buildSummaryPill(focusLabel),
+      _buildSummaryPill(exposureLabel),
+      _buildSummaryPill(isoLabel),
+    ];
 
-    final bool flashEnabled = _flashAllowed;
+    if (_lastSavedPath != null) {
+      pills.add(_buildSummaryPill('Saved to Photos'));
+    }
 
+    return Wrap(
+      spacing: 10,
+      runSpacing: 8,
+      alignment: WrapAlignment.center,
+      children: pills,
+    );
+  }
+
+  Widget _buildSummaryPill(String label) {
     return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: _railOverlay,
-        borderRadius: BorderRadius.circular(18),
+        color: Colors.black.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _chipBorderColor),
       ),
-      padding: const EdgeInsets.fromLTRB(10, 12, 10, 12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          _buildRailCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  modeLabel,
-                  style: const TextStyle(color: Colors.white54, fontSize: 11),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'ISO $isoEstimate',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                Text(
-                  evLabel,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildRailCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  stackSummary,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                Text(
-                  durationSummary,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildRailCard(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  flashEnabled ? Icons.flash_auto : Icons.flash_off,
-                  color: Colors.white70,
-                  size: 18,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  flashEnabled ? 'Flash auto' : 'Flash off',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-        ],
+      child: Text(
+        label,
+        style: const TextStyle(color: Colors.white70, fontSize: 12),
       ),
     );
   }
 
-  Widget _buildRailCard({required Widget child}) {
-    return Container(
-      decoration: BoxDecoration(
-        color: _panelColor.withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _chipBorderColor, width: 1),
-        boxShadow: const [
-          BoxShadow(blurRadius: 18, color: Colors.black54, offset: Offset(0, 6)),
-        ],
+  Widget _buildAdjustmentIconButton({
+    required IconData icon,
+    required String label,
+    required bool active,
+    required bool enabled,
+    required VoidCallback? onTap,
+  }) {
+    final Color iconColor = active ? _accentColor : Colors.white;
+    final Color background = active
+        ? _accentColor.withValues(alpha: 0.2)
+        : Colors.black.withValues(alpha: 0.35);
+
+    return Opacity(
+      opacity: enabled ? 1 : 0.35,
+      child: SizedBox(
+        width: 72,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Material(
+              color: background,
+              borderRadius: BorderRadius.circular(18),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(18),
+                onTap: enabled ? onTap : null,
+                splashColor: _accentColor.withValues(alpha: 0.2),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Icon(icon, color: iconColor, size: 24),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ],
+        ),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-      child: child,
+    );
+  }
+
+  Widget _buildAdjustmentsTray(BuildContext context) {
+    final bool expanded = _adjustmentsExpanded;
+    if (!expanded) {
+      return const SizedBox.shrink();
+    }
+
+    final bool focusAvailable = _focusSupported;
+    final bool exposureAdjustable = _exposureAdjustable;
+
+    Widget buildKindButton({
+      required IconData icon,
+      required String label,
+      required _AdjustmentKind kind,
+      bool enabled = true,
+    }) {
+      final bool isActive = _activeAdjustment == kind;
+      final bool effectiveEnabled = enabled && !_isCapturing;
+      return _buildAdjustmentIconButton(
+        icon: icon,
+        label: label,
+        active: isActive,
+        enabled: effectiveEnabled,
+        onTap: effectiveEnabled
+            ? () {
+                setState(() {
+                  _activeAdjustment = isActive ? null : kind;
+                });
+              }
+            : null,
+      );
+    }
+
+    final List<Widget> buttons = [
+      buildKindButton(
+        icon: Icons.timelapse,
+        label: 'Duration',
+        kind: _AdjustmentKind.duration,
+      ),
+      buildKindButton(
+        icon: Icons.graphic_eq,
+        label: 'FPS',
+        kind: _AdjustmentKind.fps,
+      ),
+      buildKindButton(
+        icon: Icons.center_focus_weak,
+        label: 'Focus',
+        kind: _AdjustmentKind.focus,
+        enabled: focusAvailable,
+      ),
+      buildKindButton(
+        icon: Icons.blur_on,
+        label: 'Auto ISO',
+        kind: _AdjustmentKind.autoIso,
+        enabled: exposureAdjustable,
+      ),
+      buildKindButton(
+        icon: Icons.tune,
+        label: 'Manual EV',
+        kind: _AdjustmentKind.manualExposure,
+        enabled: exposureAdjustable,
+      ),
+      buildKindButton(
+        icon: Icons.auto_awesome,
+        label: 'Stars',
+        kind: _AdjustmentKind.starEnhance,
+      ),
+      _buildAdjustmentIconButton(
+        icon: _showThirdsOverlay ? Icons.grid_off : Icons.grid_on,
+        label: _showThirdsOverlay ? 'Hide grid' : 'Thirds',
+        active: _showThirdsOverlay,
+        enabled: true,
+        onTap: () {
+          setState(() {
+            _showThirdsOverlay = !_showThirdsOverlay;
+          });
+        },
+      ),
+    ];
+
+    return Align(
+      alignment: Alignment.topRight,
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.only(top: 64, right: 12),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: _panelColor.withValues(alpha: 0.98),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: _chipBorderColor),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black54,
+                  blurRadius: 24,
+                  offset: Offset(0, 12),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Quick controls',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 12,
+                    children: buttons,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAdjustmentPanel(BuildContext context) {
+    final _AdjustmentKind? active = _activeAdjustment;
+    if (active == null) {
+      return const SizedBox.shrink();
+    }
+
+    String title;
+    Widget body;
+    switch (active) {
+      case _AdjustmentKind.duration:
+      case _AdjustmentKind.fps:
+        title = 'Capture planner';
+        body = _buildCapturePlanner();
+        break;
+      case _AdjustmentKind.focus:
+        title = 'Focus';
+        body = _buildFocusControls();
+        break;
+      case _AdjustmentKind.autoIso:
+        title = 'Auto ISO bias';
+        body = _buildAutoIsoControls(context);
+        break;
+      case _AdjustmentKind.manualExposure:
+        title = 'Manual exposure';
+        body = _buildManualExposureControls(context);
+        break;
+      case _AdjustmentKind.starEnhance:
+        title = 'Star highlight boost';
+        body = _buildStarEnhanceControls();
+        break;
+    }
+
+    final double bottomPadding = MediaQuery.of(context).padding.bottom;
+
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 0, 16, bottomPadding + 16),
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(20, 18, 12, 16),
+            decoration: BoxDecoration(
+              color: _panelColor.withValues(alpha: 0.98),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: _chipBorderColor),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black87,
+                  blurRadius: 28,
+                  offset: Offset(0, 18),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => setState(() => _activeAdjustment = null),
+                      icon: const Icon(Icons.close, color: Colors.white70),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                body,
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFocusControls() {
+    if (!_focusSupported) {
+      return const Text(
+        'This camera does not expose manual focus controls.',
+        style: TextStyle(color: Colors.white54),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildAutoFocusToggle(),
+        const SizedBox(height: 12),
+        if (!_autoFocusEnabled) ...[
+          _buildFocusSlider(),
+          const SizedBox(height: 8),
+        ] else
+          const SizedBox(height: 8),
+        const Text(
+          'Switch to manual to pull focus toward infinity or a nearby subject.',
+          style: TextStyle(color: Colors.white38, fontSize: 12),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAutoIsoControls(BuildContext context) {
+    final bool adjustable = _exposureAdjustable;
+    final double minBias = math.max(_minExposureOffset, _minAutoIsoBias);
+    final double maxBias = math.min(_maxExposureOffset, _maxAutoIsoBias);
+    final double value = _autoIsoBias.clamp(minBias, maxBias);
+    final String label = value >= 0 ? '+${value.toStringAsFixed(1)} EV' : '${value.toStringAsFixed(1)} EV';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Enable auto ISO', style: TextStyle(color: Colors.white)),
+            Switch.adaptive(
+              value: _autoIsoEnabled,
+              thumbColor: _switchThumbColor,
+              trackColor: _switchTrackColor,
+              onChanged:
+                  (_isCapturing || !adjustable) ? null : (value) => _setAutoIsoEnabled(value),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          adjustable
+              ? 'Let NightPlus trim or boost ISO between frames for steadier light.'
+              : 'This lens does not expose EV adjustments.',
+          style: const TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+        const SizedBox(height: 12),
+        SliderTheme(
+          data: _sliderTheme(context),
+          child: Slider(
+            value: value,
+            min: minBias,
+            max: maxBias,
+            divisions: adjustable
+                ? math.max(1, ((maxBias - minBias) * 10).round())
+                : 1,
+            label: label,
+            onChanged: (_autoIsoEnabled && adjustable && !_isCapturing)
+                ? (next) => _setAutoIsoBias(next)
+                : null,
+          ),
+        ),
+        Text(
+          _autoIsoEnabled
+              ? 'Bias $label. Negative favors cleaner frames, positive leans brighter.'
+              : 'Enable auto ISO to tune the bias.',
+          style: const TextStyle(color: Colors.white38, fontSize: 12),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildManualExposureControls(BuildContext context) {
+    final bool adjustable = _exposureAdjustable;
+    final double value = _manualExposureOffset.clamp(_minExposureOffset, _maxExposureOffset);
+    final String label = value >= 0 ? '+${value.toStringAsFixed(1)} EV' : '${value.toStringAsFixed(1)} EV';
+    final int isoEstimate = _estimateIsoFromEv(value);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Enable manual EV', style: TextStyle(color: Colors.white)),
+            Switch.adaptive(
+              value: _manualExposureEnabled,
+              thumbColor: _switchThumbColor,
+              trackColor: _switchTrackColor,
+              onChanged:
+                  (_isCapturing || !adjustable) ? null : (value) => _setManualExposureEnabled(value),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          adjustable
+              ? 'Lock exposure compensation to hold brightness across the stack.'
+              : 'This lens does not expose manual EV controls.',
+          style: const TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+        const SizedBox(height: 12),
+        SliderTheme(
+          data: _sliderTheme(context),
+          child: Slider(
+            value: value,
+            min: _minExposureOffset,
+            max: _maxExposureOffset,
+            divisions: adjustable
+                ? math.max(1, ((_maxExposureOffset - _minExposureOffset) * 10).round())
+                : 1,
+            label: label,
+            onChanged: (_manualExposureEnabled && adjustable && !_isCapturing)
+                ? (next) => _setManualExposureOffset(next)
+                : null,
+          ),
+        ),
+        Text(
+          _manualExposureEnabled
+              ? 'EV $label · approx ISO $isoEstimate.'
+              : 'Enable manual EV to drag this slider.',
+          style: const TextStyle(color: Colors.white38, fontSize: 12),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStarEnhanceControls() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Star highlight boost', style: TextStyle(color: Colors.white)),
+            Switch.adaptive(
+              value: _starEnhance,
+              thumbColor: _switchThumbColor,
+              trackColor: _switchTrackColor,
+              onChanged: _isCapturing ? null : _setStarEnhance,
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Keeps the brightest pinpoints from the stack while lifting deep shadows.',
+          style: TextStyle(color: Colors.white38, fontSize: 12),
+        ),
+      ],
     );
   }
 
@@ -1333,62 +1639,6 @@ class _CameraHomeState extends State<CameraHome> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildBottomControls(BuildContext context) {
-    final double bottomPadding = MediaQuery.of(context).padding.bottom;
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: _panelColor,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        border: Border.all(color: _chipBorderColor, width: 1),
-        boxShadow: const [
-          BoxShadow(blurRadius: 24, color: Colors.black54, offset: Offset(0, -6)),
-        ],
-      ),
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 20,
-        bottom: 20 + bottomPadding,
-      ),
-      child: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 38,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: _accentMuted.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ),
-            ),
-            const SizedBox(height: 18),
-            if (_lastSavedPath != null) ...[
-              const Text(
-                'Saved last to Photos',
-                style: TextStyle(color: Colors.white54, fontSize: 12),
-              ),
-              const SizedBox(height: 16),
-            ],
-            _buildCapturePlanner(),
-            if (_focusSupported) ...[
-              const SizedBox(height: 20),
-              _buildAutoFocusToggle(),
-              if (!_autoFocusEnabled) ...[
-                const SizedBox(height: 12),
-                _buildFocusSlider(),
-              ],
-            ],
-          ],
-        ),
       ),
     );
   }
@@ -2222,6 +2472,48 @@ Uint8List _boxBlur3x3(Uint8List data, int width, int height) {
   return output;
 }
 
+class _RuleOfThirdsOverlay extends StatelessWidget {
+  const _RuleOfThirdsOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _ThirdsPainter(Theme.of(context).colorScheme.primary),
+    );
+  }
+}
+
+class _ThirdsPainter extends CustomPainter {
+  _ThirdsPainter(Color accent)
+      : linePaint = Paint()
+          ..color = accent.withValues(alpha: 0.25)
+          ..strokeWidth = 1.2
+          ..style = PaintingStyle.stroke;
+
+  final Paint linePaint;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double thirdWidth = size.width / 3;
+    final double thirdHeight = size.height / 3;
+
+    for (int i = 1; i <= 2; i++) {
+      final double dx = thirdWidth * i;
+      canvas.drawLine(Offset(dx, 0), Offset(dx, size.height), linePaint);
+    }
+
+    for (int i = 1; i <= 2; i++) {
+      final double dy = thirdHeight * i;
+      canvas.drawLine(Offset(0, dy), Offset(size.width, dy), linePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ThirdsPainter oldDelegate) {
+    return oldDelegate.linePaint.color != linePaint.color;
+  }
+}
+
 Uint8List _applyPhotoAdjustments(
   Uint8List source,
   double exposureStops,
@@ -2268,6 +2560,24 @@ class _EditedPhotoResult {
   final String savedPath;
 }
 
+enum _CropPreset { original, square, fourThree, threeFour, sixteenNine }
+
+class _CropWindow {
+  const _CropWindow({
+    required this.left,
+    required this.top,
+    required this.width,
+    required this.height,
+    required this.isFullFrame,
+  });
+
+  final int left;
+  final int top;
+  final int width;
+  final int height;
+  final bool isFullFrame;
+}
+
 // Lightweight editor for tweaking the most recent capture.
 class RecentPhotoEditor extends StatefulWidget {
   const RecentPhotoEditor({super.key, required this.imageBytes});
@@ -2288,10 +2598,16 @@ class _RecentPhotoEditorState extends State<RecentPhotoEditor> {
   int _previewHeight = 0;
   int _fullWidth = 0;
   int _fullHeight = 0;
+  double _previewAspect = 1;
 
   double _exposureStops = 0;
   double _shadowLift = 0;
   double _saturationDelta = 0;
+
+  _CropPreset _cropPreset = _CropPreset.original;
+  double _cropZoom = 1.0;
+  double _cropCenterX = 0.5;
+  double _cropCenterY = 0.5;
 
   bool _preparing = true;
   bool _isSaving = false;
@@ -2357,6 +2673,8 @@ class _RecentPhotoEditorState extends State<RecentPhotoEditor> {
         img.encodeJpg(preview, quality: 92),
       );
       _previewJpeg = _basePreviewJpeg;
+      _previewAspect =
+          _previewHeight == 0 ? 1 : _previewWidth / _previewHeight;
 
       if (!mounted) {
         return;
@@ -2399,27 +2717,63 @@ class _RecentPhotoEditorState extends State<RecentPhotoEditor> {
     do {
       _previewDirty = false;
 
+      final _CropWindow crop = _resolveCropWindow(_previewWidth, _previewHeight);
       Uint8List nextBytes;
-      if (_isNeutralAdjustments) {
+
+      if (_isNeutralAdjustments && crop.isFullFrame) {
         nextBytes = _basePreviewJpeg!;
-      } else {
-        final Uint8List adjusted = _applyPhotoAdjustments(
-          _previewRgb!,
+        final double aspect =
+            _previewHeight == 0 ? 1 : _previewWidth / _previewHeight;
+        if (mounted) {
+          setState(() {
+            _previewJpeg = nextBytes;
+            _previewAspect = aspect;
+          });
+        }
+        continue;
+      }
+
+      final img.Image baseImage = img.Image.fromBytes(
+        width: _previewWidth,
+        height: _previewHeight,
+        bytes: _previewRgb!.buffer,
+        numChannels: 3,
+        order: img.ChannelOrder.rgb,
+      );
+
+      img.Image workingImage = crop.isFullFrame
+          ? baseImage
+          : img.copyCrop(
+              baseImage,
+              x: crop.left,
+              y: crop.top,
+              width: crop.width,
+              height: crop.height,
+            );
+
+      Uint8List workingBytes = Uint8List.fromList(
+        workingImage.getBytes(order: img.ChannelOrder.rgb),
+      );
+
+      if (!_isNeutralAdjustments) {
+        workingBytes = _applyPhotoAdjustments(
+          workingBytes,
           _exposureStops,
           _shadowLift,
           _saturationDelta,
         );
-        final img.Image previewImage = img.Image.fromBytes(
-          width: _previewWidth,
-          height: _previewHeight,
-          bytes: adjusted.buffer,
+        workingImage = img.Image.fromBytes(
+          width: workingImage.width,
+          height: workingImage.height,
+          bytes: workingBytes.buffer,
           numChannels: 3,
           order: img.ChannelOrder.rgb,
         );
-        nextBytes = Uint8List.fromList(
-          img.encodeJpg(previewImage, quality: 90),
-        );
       }
+
+      nextBytes = Uint8List.fromList(
+        img.encodeJpg(workingImage, quality: 90),
+      );
 
       if (!mounted) {
         _renderingPreview = false;
@@ -2428,6 +2782,9 @@ class _RecentPhotoEditorState extends State<RecentPhotoEditor> {
 
       setState(() {
         _previewJpeg = nextBytes;
+        _previewAspect = workingImage.height == 0
+            ? 1
+            : workingImage.width / workingImage.height;
       });
     } while (_previewDirty);
 
@@ -2443,8 +2800,8 @@ class _RecentPhotoEditorState extends State<RecentPhotoEditor> {
       _exposureStops = 0;
       _shadowLift = 0;
       _saturationDelta = 0;
-      _previewJpeg = _basePreviewJpeg;
     });
+    _schedulePreview();
   }
 
   Future<void> _saveEdits() async {
@@ -2461,24 +2818,52 @@ class _RecentPhotoEditorState extends State<RecentPhotoEditor> {
     });
 
     try {
+      final _CropWindow crop = _resolveCropWindow(_fullWidth, _fullHeight);
+      final bool needsCrop = !crop.isFullFrame;
+      final bool needsAdjustments = !_isNeutralAdjustments;
+
       Uint8List encoded;
-      if (_isNeutralAdjustments) {
+      if (!needsCrop && !needsAdjustments) {
         encoded = Uint8List.fromList(widget.imageBytes);
       } else {
-        final Uint8List adjusted = _applyPhotoAdjustments(
-          baseFull,
-          _exposureStops,
-          _shadowLift,
-          _saturationDelta,
-        );
-        final img.Image output = img.Image.fromBytes(
+        img.Image workingImage = img.Image.fromBytes(
           width: _fullWidth,
           height: _fullHeight,
-          bytes: adjusted.buffer,
+          bytes: baseFull.buffer,
           numChannels: 3,
           order: img.ChannelOrder.rgb,
         );
-        encoded = Uint8List.fromList(img.encodeJpg(output, quality: 96));
+
+        if (needsCrop) {
+          workingImage = img.copyCrop(
+            workingImage,
+            x: crop.left,
+            y: crop.top,
+            width: crop.width,
+            height: crop.height,
+          );
+        }
+
+        if (needsAdjustments) {
+          Uint8List workingBytes = Uint8List.fromList(
+            workingImage.getBytes(order: img.ChannelOrder.rgb),
+          );
+          workingBytes = _applyPhotoAdjustments(
+            workingBytes,
+            _exposureStops,
+            _shadowLift,
+            _saturationDelta,
+          );
+          workingImage = img.Image.fromBytes(
+            width: workingImage.width,
+            height: workingImage.height,
+            bytes: workingBytes.buffer,
+            numChannels: 3,
+            order: img.ChannelOrder.rgb,
+          );
+        }
+
+        encoded = Uint8List.fromList(img.encodeJpg(workingImage, quality: 96));
       }
 
       final String savedPath = await saveProcessedPhotoBytes(encoded, 'jpg');
@@ -2499,6 +2884,118 @@ class _RecentPhotoEditorState extends State<RecentPhotoEditor> {
         _isSaving = false;
       });
     }
+  }
+
+  bool get _hasCustomCrop {
+    return _cropPreset != _CropPreset.original ||
+        (_cropZoom - 1).abs() > 0.001 ||
+        (_cropCenterX - 0.5).abs() > 0.001 ||
+        (_cropCenterY - 0.5).abs() > 0.001;
+  }
+
+  _CropWindow _resolveCropWindow(int width, int height) {
+    if (width <= 0 || height <= 0) {
+      return _CropWindow(
+        left: 0,
+        top: 0,
+        width: math.max(1, width),
+        height: math.max(1, height),
+        isFullFrame: true,
+      );
+    }
+
+    final double sourceAspect = width / height;
+    final double targetAspect = _desiredCropAspect(sourceAspect);
+    final double zoom = _cropZoom.clamp(1.0, 5.0);
+
+    double cropWidth;
+    double cropHeight;
+    if (targetAspect >= sourceAspect) {
+      cropWidth = width / zoom;
+      cropHeight = cropWidth / targetAspect;
+      if (cropHeight > height) {
+        cropHeight = height.toDouble();
+        cropWidth = cropHeight * targetAspect;
+      }
+    } else {
+      cropHeight = height / zoom;
+      cropWidth = cropHeight * targetAspect;
+      if (cropWidth > width) {
+        cropWidth = width.toDouble();
+        cropHeight = cropWidth / targetAspect;
+      }
+    }
+
+    cropWidth = cropWidth.clamp(1.0, width.toDouble());
+    cropHeight = cropHeight.clamp(1.0, height.toDouble());
+
+    double left = _cropCenterX.clamp(0.0, 1.0) * width - cropWidth / 2;
+    double top = _cropCenterY.clamp(0.0, 1.0) * height - cropHeight / 2;
+    left = left.clamp(0.0, width - cropWidth);
+    top = top.clamp(0.0, height - cropHeight);
+
+    final bool isFullFrame =
+        _cropPreset == _CropPreset.original && zoom <= 1.0001;
+
+    return _CropWindow(
+      left: left.round(),
+      top: top.round(),
+      width: cropWidth.round().clamp(1, width),
+      height: cropHeight.round().clamp(1, height),
+      isFullFrame: isFullFrame,
+    );
+  }
+
+  double _desiredCropAspect(double sourceAspect) {
+    switch (_cropPreset) {
+      case _CropPreset.square:
+        return 1;
+      case _CropPreset.fourThree:
+        return 4 / 3;
+      case _CropPreset.threeFour:
+        return 3 / 4;
+      case _CropPreset.sixteenNine:
+        return 16 / 9;
+      case _CropPreset.original:
+        return sourceAspect;
+    }
+  }
+
+  String _cropPresetLabel(_CropPreset preset) {
+    switch (preset) {
+      case _CropPreset.original:
+        return 'Original';
+      case _CropPreset.square:
+        return '1:1';
+      case _CropPreset.fourThree:
+        return '4:3';
+      case _CropPreset.threeFour:
+        return '3:4';
+      case _CropPreset.sixteenNine:
+        return '16:9';
+    }
+  }
+
+  void _setCropPreset(_CropPreset preset) {
+    if (_cropPreset == preset) {
+      return;
+    }
+    setState(() => _cropPreset = preset);
+    _schedulePreview();
+  }
+
+  void _resetCrop() {
+    if (!_hasCustomCrop) {
+      return;
+    }
+    _previewDebounce?.cancel();
+    setState(() {
+      _cropPreset = _CropPreset.original;
+      _cropZoom = 1.0;
+      _cropCenterX = 0.5;
+      _cropCenterY = 0.5;
+    });
+    _schedulePreview();
   }
 
   @override
@@ -2575,9 +3072,7 @@ class _RecentPhotoEditorState extends State<RecentPhotoEditor> {
       );
     }
 
-    final double aspectRatio = _previewWidth <= 0 || _previewHeight <= 0
-        ? 1
-        : _previewWidth / _previewHeight;
+    final double aspectRatio = _previewAspect <= 0 ? 1 : _previewAspect;
 
     return InteractiveViewer(
       minScale: 1,
@@ -2627,6 +3122,8 @@ class _RecentPhotoEditorState extends State<RecentPhotoEditor> {
             ),
           ),
           const SizedBox(height: 18),
+          _buildCropControls(enabled),
+          const SizedBox(height: 18),
           _buildAdjustmentSlider(
             label: 'Exposure',
             value: _exposureStops,
@@ -2675,7 +3172,12 @@ class _RecentPhotoEditorState extends State<RecentPhotoEditor> {
             children: [
               TextButton(
                 onPressed: !_isNeutralAdjustments ? _resetAdjustments : null,
-                child: const Text('Reset'),
+                child: const Text('Reset edits'),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: _hasCustomCrop ? _resetCrop : null,
+                child: const Text('Reset crop'),
               ),
               const Spacer(),
               FilledButton(
@@ -2701,6 +3203,80 @@ class _RecentPhotoEditorState extends State<RecentPhotoEditor> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildCropControls(bool enabled) {
+    final List<_CropPreset> presets = _CropPreset.values;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Crop',
+          style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: presets.map((preset) {
+            final bool selected = _cropPreset == preset;
+            return ChoiceChip(
+              label: Text(
+                _cropPresetLabel(preset),
+                style: const TextStyle(color: Colors.white),
+              ),
+              selected: selected,
+              selectedColor: Colors.white24,
+              backgroundColor: Colors.white12,
+              onSelected: enabled ? (_) => _setCropPreset(preset) : null,
+              showCheckmark: false,
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 12),
+        _buildAdjustmentSlider(
+          label: 'Crop zoom',
+          value: _cropZoom,
+          min: 1,
+          max: 3,
+          divisions: 20,
+          displayValue: '${_cropZoom.toStringAsFixed(1)}x',
+          enabled: enabled,
+          onChanged: (value) {
+            setState(() => _cropZoom = value);
+            _schedulePreview();
+          },
+        ),
+        const SizedBox(height: 12),
+        _buildAdjustmentSlider(
+          label: 'Horizontal offset',
+          value: _cropCenterX,
+          min: 0,
+          max: 1,
+          divisions: 24,
+          displayValue: _formatPercentDelta((_cropCenterX - 0.5) * 2),
+          enabled: enabled,
+          onChanged: (value) {
+            setState(() => _cropCenterX = value);
+            _schedulePreview();
+          },
+        ),
+        const SizedBox(height: 12),
+        _buildAdjustmentSlider(
+          label: 'Vertical offset',
+          value: _cropCenterY,
+          min: 0,
+          max: 1,
+          divisions: 24,
+          displayValue: _formatPercentDelta((_cropCenterY - 0.5) * 2),
+          enabled: enabled,
+          onChanged: (value) {
+            setState(() => _cropCenterY = value);
+            _schedulePreview();
+          },
+        ),
+      ],
     );
   }
 
