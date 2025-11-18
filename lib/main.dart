@@ -1006,7 +1006,13 @@ class _CameraHomeState extends State<CameraHome> {
 
     return Scaffold(
       backgroundColor: Colors.black,
-      body: SafeArea(child: content),
+      body: SafeArea(
+        top: true,
+        bottom: false,
+        left: false,
+        right: false,
+        child: content,
+      ),
     );
   }
 
@@ -1032,6 +1038,9 @@ class _CameraHomeState extends State<CameraHome> {
   Widget _buildPreviewSection(BuildContext context, CameraController controller) {
     final double aspectRatio =
         controller.value.aspectRatio == 0 ? 1 : 1 / controller.value.aspectRatio;
+    final double safeTop = MediaQuery.of(context).padding.top;
+    const double topBarHeight = 64;
+    final double railTop = safeTop + topBarHeight + 12;
 
     return AspectRatio(
       aspectRatio: aspectRatio,
@@ -1040,16 +1049,23 @@ class _CameraHomeState extends State<CameraHome> {
         children: [
           CameraPreview(controller),
           Positioned(
-            top: 0,
-            left: 0,
+            top: railTop,
+            bottom: 0,
             right: 0,
-            child: _buildTopBar(),
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: _buildRightRail(),
+            ),
           ),
           Positioned(
             top: 0,
-            bottom: 0,
+            left: 0,
             right: 0,
-            child: _buildRightRail(),
+            child: SafeArea(
+              top: true,
+              bottom: false,
+              child: _buildTopBar(),
+            ),
           ),
           Positioned(
             left: 0,
@@ -1134,87 +1150,81 @@ class _CameraHomeState extends State<CameraHome> {
 
     final bool flashEnabled = _flashAllowed;
 
-    return Align(
-      alignment: Alignment.topRight,
-      child: SafeArea(
-        minimum: const EdgeInsets.only(top: 16, right: 16),
-        child: Container(
-          decoration: BoxDecoration(
-            color: _railOverlay,
-            borderRadius: BorderRadius.circular(18),
+    return Container(
+      decoration: BoxDecoration(
+        color: _railOverlay,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      padding: const EdgeInsets.fromLTRB(10, 12, 10, 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          _buildRailCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  modeLabel,
+                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'ISO $isoEstimate',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  evLabel,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ],
+            ),
           ),
-          padding: const EdgeInsets.fromLTRB(10, 12, 10, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              _buildRailCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      modeLabel,
-                      style: const TextStyle(color: Colors.white54, fontSize: 11),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'ISO $isoEstimate',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Text(
-                      evLabel,
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                  ],
+          const SizedBox(height: 12),
+          _buildRailCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  stackSummary,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              _buildRailCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      stackSummary,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Text(
-                      durationSummary,
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                  ],
+                Text(
+                  durationSummary,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
-              ),
-              const SizedBox(height: 12),
-              _buildRailCard(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      flashEnabled ? Icons.flash_auto : Icons.flash_off,
-                      color: Colors.white70,
-                      size: 18,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      flashEnabled ? 'Flash auto' : 'Flash off',
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
+          const SizedBox(height: 12),
+          _buildRailCard(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  flashEnabled ? Icons.flash_auto : Icons.flash_off,
+                  color: Colors.white70,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  flashEnabled ? 'Flash auto' : 'Flash off',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1261,18 +1271,41 @@ class _CameraHomeState extends State<CameraHome> {
     required bool selected,
     required VoidCallback? onTap,
   }) {
-    return ChoiceChip(
-      label: Text(label),
-      showCheckmark: false,
-      side: BorderSide(color: selected ? _accentColor : _chipBorderColor),
-      backgroundColor: Colors.white.withValues(alpha: 0.04),
-      selectedColor: _accentColor.withValues(alpha: 0.2),
-      labelStyle: TextStyle(
-        color: selected ? Colors.white : Colors.white70,
-        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+    final bool disabled = onTap == null;
+    final Color background = selected
+        ? _accentColor.withValues(alpha: 0.18)
+        : _panelColor.withValues(alpha: 0.7);
+    final Color borderColor = selected ? _accentColor : _chipBorderColor;
+    final Color textColor = selected ? Colors.white : Colors.white70;
+
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 150),
+      opacity: disabled ? 0.45 : 1,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          splashColor: _accentColor.withValues(alpha: 0.2),
+          highlightColor: _accentColor.withValues(alpha: 0.1),
+          onTap: disabled ? null : onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: borderColor),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: textColor,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
       ),
-      onSelected: onTap == null ? null : (_) => onTap(),
-      selected: selected,
     );
   }
 
