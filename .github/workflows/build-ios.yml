@@ -9,7 +9,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install Flutter
       uses: subosito/flutter-action@v2
@@ -28,7 +28,7 @@ jobs:
         zip -r Runner.zip Runner.app
 
     - name: Upload app bundle
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: livecontainer-app
         path: build/ios/iphoneos/Runner.zip
