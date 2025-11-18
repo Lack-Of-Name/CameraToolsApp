@@ -1,0 +1,34 @@
+name: Build iOS (LiveContainer)
+
+on:
+  workflow_dispatch:  # Allows manual trigger
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Install Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+
+    - name: Install dependencies
+      run: flutter pub get
+
+    - name: Build iOS (unsigned)
+      run: flutter build ios --release --no-codesign
+
+    - name: Zip Runner.app
+      run: |
+        cd build/ios/iphoneos
+        zip -r Runner.zip Runner.app
+
+    - name: Upload app bundle
+      uses: actions/upload-artifact@v3
+      with:
+        name: livecontainer-app
+        path: build/ios/iphoneos/Runner.zip
